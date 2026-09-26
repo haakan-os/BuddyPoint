@@ -8,7 +8,7 @@ import hashlib
 from http.client import HTTPException
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import sys
 import tempfile
@@ -21,6 +21,8 @@ import uuid
 
 MAX_NOTE = 8 * 1024 * 1024
 MAX_LIST = 4 * 1024 * 1024
+MAX_DEPTH = 32
+MAX_ENTRIES = 10000
 EXTENSIONS = {".md", ".markdown"}
 
 
@@ -42,13 +44,32 @@ def safe_name(name):
     return name
 
 
+def safe_relative(name):
+    if not isinstance(name, str) or not name or len(name.split("/")) > MAX_DEPTH:
+        raise SyncError(f"Invalid or excessively deep notes path: {name!r}")
+    for part in name.split("/"):
+        safe_name(part)
+    return name
+
+
+def sibling(name, basename):
+    return str(PurePosixPath(safe_relative(name)).with_name(safe_name(basename)))
+
+
 def check_collisions(names):
     seen = {}
-    for name in names:
-        key = unicodedata.normalize("NFC", name).casefold()
-        if key in seen and seen[key] != name:
-            raise SyncError(f"Names differ only by case or Unicode spelling: {seen[key]!r}, {name!r}")
-        seen[key] = name
+    files = set(names)
+    for name in files:
+        safe_relative(name)
+        parts = name.split("/")
+        for length in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:length])
+            key = unicodedata.normalize("NFC", prefix).casefold()
+            if key in seen and seen[key] != prefix:
+                raise SyncError(f"Names differ only by case or Unicode spelling: {seen[key]!r}, {prefix!r}")
+            if length < len(parts) and prefix in files:
+                raise SyncError(f"A note is also used as a folder: {prefix}")
+            seen[key] = prefix
 
 
 def atomic_write(path, data):
@@ -176,43 +197,80 @@ class Reader:
         if not dry_run:
             self.request("/mkdir", form={"path": "/", "name": self.folder[1:]})
 
+    def ensure_parent(self, name):
+        parent = self.folder
+        for component in safe_relative(name).split("/")[:-1]:
+            key = unicodedata.normalize("NFC", component).casefold()
+            matches = [item for item in self.listing(parent)
+                       if unicodedata.normalize("NFC", item["name"]).casefold() == key]
+            if matches:
+                if len(matches) != 1 or matches[0]["name"] != component or not matches[0]["isDirectory"]:
+                    raise SyncError(f"Reader folder conflicts with an existing name: {parent}/{component}")
+            else:
+                self.request("/mkdir", form={"path": parent, "name": component})
+            parent += "/" + component
+
     def notes(self):
         result = set()
-        for item in self.listing(self.folder):
-            name = item["name"]
-            if item["isDirectory"] or name.startswith(".") or Path(name).suffix.lower() not in EXTENSIONS:
-                continue
-            safe_name(name)
-            if name in result:
-                raise SyncError(f"Duplicate reader filename: {name}")
-            result.add(name)
+        pending = [""]
+        entries_seen = 0
+        while pending:
+            relative = pending.pop()
+            folder = self.folder + ("/" + relative if relative else "")
+            entries = self.listing(folder)
+            entries_seen += len(entries)
+            if entries_seen > MAX_ENTRIES:
+                raise SyncError("Reader notes tree exceeds the 10,000-entry scan limit.")
+            siblings = set()
+            for item in entries:
+                name = item["name"]
+                if name in {".", ".."} or "/" in name or "\\" in name:
+                    raise SyncError(f"Invalid reader directory entry: {name!r}")
+                if name.startswith("."):
+                    continue
+                safe_name(name)
+                if name in siblings:
+                    raise SyncError(f"Duplicate reader filename: {folder}/{name}")
+                siblings.add(name)
+                path = safe_relative(f"{relative}/{name}" if relative else name)
+                if item["isDirectory"]:
+                    pending.append(path)
+                elif PurePosixPath(name).suffix.lower() in EXTENSIONS:
+                    result.add(path)
+            check_collisions(siblings)
         check_collisions(result)
         return result
 
     def read(self, name):
-        return self.request("/download", {"path": f"{self.folder}/{safe_name(name)}"}, missing=True, limit=MAX_NOTE)
+        return self.request("/download", {"path": f"{self.folder}/{safe_relative(name)}"}, missing=True, limit=MAX_NOTE)
 
     def upload(self, name, data):
-        safe_name(name)
+        self.ensure_parent(name)
+        path = PurePosixPath(safe_relative(name))
+        destination = self.folder + ("/" + str(path.parent) if str(path.parent) != "." else "")
         boundary = "BuddySync" + uuid.uuid4().hex
-        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{name}"\r\n'
+        body = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{path.name}"\r\n'
                 'Content-Type: application/octet-stream\r\n\r\n').encode() + data
         body += f"\r\n--{boundary}--\r\n".encode()
-        self.request("/api/upload", {"path": self.folder}, data=body,
+        self.request("/api/upload", {"path": destination}, data=body,
                      headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
 
     def rename(self, old, new):
-        self.request("/rename", form={"path": f"{self.folder}/{safe_name(old)}", "name": safe_name(new)})
+        source, destination = PurePosixPath(safe_relative(old)), PurePosixPath(safe_relative(new))
+        if source.parent != destination.parent:
+            raise SyncError("Sync renames must stay in the same folder.")
+        self.request("/rename", form={"path": f"{self.folder}/{old}", "name": destination.name})
 
     def remove_scratch(self, name):
-        if not re.fullmatch(r"buddysync-[0-9a-f]{32}\.(part|backup)", name):
+        path = PurePosixPath(safe_relative(name))
+        if not re.fullmatch(r"buddysync-[0-9a-f]{32}\.(part|backup)", path.name):
             raise SyncError("Refusing to remove a file that is not a sync temporary file.")
         self.request("/delete", form={"path": f"{self.folder}/{name}"})
 
 
 class Sync:
     def __init__(self, folder, reader, state_dir, dry_run=False, report=print):
-        self.folder, self.reader, self.state_dir = folder, reader, state_dir
+        self.folder, self.reader, self.state_dir = folder.resolve(), reader, state_dir
         self.dry_run, self.report = dry_run, report
         self.pending_path = state_dir / "pending.json"
         self.state_path = state_dir / "state.json"
@@ -224,10 +282,41 @@ class Sync:
                        for v in self.state["files"].values())):
             raise SyncError("Sync history is invalid or belongs to another folder/device. Keep it for recovery.")
 
+    def local_path(self, name):
+        path = self.folder
+        for component in safe_relative(name).split("/"):
+            path = path / component
+            if path.is_symlink() or path.resolve() != path.absolute():
+                raise SyncError(f"Symbolic links and directory links are not synced: {name}")
+        return path
+
+    def local_notes(self):
+        result = set()
+        pending = [self.folder]
+        entries_seen = 0
+        while pending:
+            directory = pending.pop()
+            children = list(directory.iterdir())
+            entries_seen += len(children)
+            if entries_seen > MAX_ENTRIES:
+                raise SyncError("Computer notes tree exceeds the 10,000-entry scan limit.")
+            siblings = []
+            for child in children:
+                if child.name.startswith("."):
+                    continue
+                relative = child.relative_to(self.folder).as_posix()
+                path = self.local_path(relative)
+                siblings.append(child.name)
+                if path.is_dir():
+                    pending.append(path)
+                elif path.suffix.lower() in EXTENSIONS:
+                    result.add(relative)
+            check_collisions(siblings)
+        check_collisions(result)
+        return result
+
     def local(self, name):
-        path = self.folder / safe_name(name)
-        if path.is_symlink():
-            raise SyncError(f"Symbolic links are not synced: {name}")
+        path = self.local_path(name)
         try:
             with path.open("rb") as source:
                 data = source.read(MAX_NOTE + 1)
@@ -257,11 +346,13 @@ class Sync:
         if not isinstance(pending, dict) or pending.get("identity") != self.identity:
             raise SyncError("Upload recovery belongs to another device or folder.")
         if (not all(isinstance(pending.get(key), str) for key in ("name", "temporary", "backup", "desired"))
-                or not re.fullmatch(r"buddysync-[0-9a-f]{32}\.part", pending["temporary"])
-                or pending["backup"] != pending["temporary"].replace(".part", ".backup")
+                or not re.fullmatch(r"buddysync-[0-9a-f]{32}\.part", PurePosixPath(pending["temporary"]).name)
+                or pending["backup"] != str(PurePosixPath(pending["temporary"]).with_suffix(".backup"))
                 or not re.fullmatch(r"[0-9a-f]{64}", pending["desired"])):
             raise SyncError("Upload recovery file is invalid; keep it and the reader backup for recovery.")
-        name, temporary, backup = (safe_name(pending[key]) for key in ("name", "temporary", "backup"))
+        name, temporary, backup = (safe_relative(pending[key]) for key in ("name", "temporary", "backup"))
+        if PurePosixPath(name).parent != PurePosixPath(temporary).parent:
+            raise SyncError("Upload recovery paths must be in the same folder.")
         current = self.reader.read(name)
         saved = self.reader.read(backup)
         if current is None and saved is not None:
@@ -281,7 +372,7 @@ class Sync:
         self.archive(data)
         self.archive(expected)
         token = uuid.uuid4().hex
-        temporary, backup = f"buddysync-{token}.part", f"buddysync-{token}.backup"
+        temporary, backup = sibling(name, f"buddysync-{token}.part"), sibling(name, f"buddysync-{token}.backup")
         # Journal before touching the reader so a dropped connection is recoverable.
         save_json(self.pending_path, {"identity": self.identity, "name": name, "temporary": temporary,
                                       "backup": backup, "desired": digest(data)})
@@ -306,16 +397,13 @@ class Sync:
             raise SyncError(f"Computer note changed during sync: {name}; retry after saving your edits.")
         self.archive(expected)
         self.archive(data)
-        atomic_write(self.folder / name, data)
+        atomic_write(self.local_path(name), data)
 
     def run(self):
         self.reader.status()
         self.reader.ensure_folder(self.dry_run)
         self.recover()
-        local_names = {p.name for p in self.folder.iterdir()
-                       if not p.name.startswith(".") and p.suffix.lower() in EXTENSIONS and not p.is_dir()}
-        for name in local_names:
-            safe_name(name)
+        local_names = self.local_notes()
         remote_names = self.reader.notes()
         names = local_names | remote_names
         check_collisions(names)
@@ -345,8 +433,7 @@ class Sync:
                 # Leave the computer version at the original name. Publish the
                 # reader version as a separate note on both sides before replacing it.
                 suffix = Path(name).suffix
-                conflict = f"{Path(name).stem[:32]}.reader-conflict-{digest(remote)[:16]}{suffix}"
-                safe_name(conflict)
+                conflict = sibling(name, f"{PurePosixPath(name).stem[:32]}.reader-conflict-{digest(remote)[:16]}{suffix}")
                 check_collisions(names | {conflict})
                 self.report(f"Conflict: {name} → reader copy saved as {conflict}")
                 if not self.dry_run:
@@ -369,7 +456,7 @@ class Sync:
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--folder", required=True, type=Path, help="Local OneDrive notes folder (Markdown files only)")
+    parser.add_argument("--folder", required=True, type=Path, help="Local notes folder, including Markdown files in subfolders")
     parser.add_argument("--device", default="haakanpoint.local", help="Reader hostname or IP shown in BuddySync")
     parser.add_argument("--reader-folder", default="/OneDriveNotes", help="Dedicated SD-card folder")
     parser.add_argument("--dry-run", action="store_true", help="Preview transfers without writing notes or history")

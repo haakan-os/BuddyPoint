@@ -7,7 +7,7 @@ import threading
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
-from buddy_notes_sync import Reader, Sync, SyncError, check_collisions, digest, safe_name, sync_lock
+from buddy_notes_sync import Reader, Sync, SyncError, check_collisions, digest, safe_name, safe_relative, sync_lock
 
 
 class FakeReader:
@@ -64,6 +64,7 @@ class SyncTests(unittest.TestCase):
         return Sync(self.notes, self.reader, self.history, dry, self.messages.append).run()
 
     def write(self, data, name="note.md"):
+        (self.notes / name).parent.mkdir(parents=True, exist_ok=True)
         (self.notes / name).write_bytes(data)
 
     def baseline(self):
@@ -278,11 +279,88 @@ class SyncTests(unittest.TestCase):
         with self.assertRaises(SyncError):
             self.run_sync()
 
-    def test_non_markdown_and_subfolders_ignored(self):
+    def test_subfolders_included_and_non_markdown_ignored(self):
         self.write(b"private", "other.txt")
         (self.notes / "subfolder").mkdir()
         (self.notes / "subfolder" / "nested.md").write_bytes(b"nested")
+        self.assertEqual(self.run_sync(), 1)
+        self.assertEqual(self.reader.files, {"subfolder/nested.md": b"nested"})
+
+    def test_nested_notes_keep_structure_and_identical_basenames(self):
+        self.write(b"work", "Work/daily.md")
+        self.write(b"personal", "Personal/daily.md")
+        self.reader.files["日本語/深い/journal.markdown"] = b"remote"
+        self.run_sync()
+        self.assertEqual(self.reader.files["Work/daily.md"], b"work")
+        self.assertEqual(self.reader.files["Personal/daily.md"], b"personal")
+        self.assertEqual((self.notes / "日本語/深い/journal.markdown").read_bytes(), b"remote")
         self.assertEqual(self.run_sync(), 0)
+
+    def test_nested_conflict_stays_in_its_parent(self):
+        self.write(b"base", "Work/note.md")
+        self.run_sync()
+        self.write(b"computer", "Work/note.md")
+        self.reader.files["Work/note.md"] = b"reader"
+        self.run_sync()
+        conflicts = [name for name in self.reader.files if "reader-conflict" in name]
+        self.assertEqual(len(conflicts), 1)
+        self.assertTrue(conflicts[0].startswith("Work/"))
+        self.assertEqual((self.notes / conflicts[0]).read_bytes(), b"reader")
+        self.assertEqual(self.run_sync(), 0)
+
+    def test_nested_interrupted_upload_recovers(self):
+        self.write(b"base", "Work/Tasks/note.md")
+        self.run_sync()
+        self.write(b"updated", "Work/Tasks/note.md")
+        self.reader.fail_promote = True
+        with self.assertRaises(SyncError):
+            self.run_sync()
+        pending = json.loads((self.history / "pending.json").read_text())
+        self.assertTrue(pending["backup"].startswith("Work/Tasks/"))
+        self.reader.fail_promote = False
+        self.run_sync()
+        self.assertEqual(self.reader.files, {"Work/Tasks/note.md": b"updated"})
+
+    def test_nested_dry_run_does_not_create_local_folders(self):
+        self.reader.files["new/nested/note.md"] = b"reader"
+        self.run_sync(True)
+        self.assertFalse((self.notes / "new").exists())
+        self.assertFalse(self.reader.writes)
+        self.assertFalse(self.history.exists())
+
+    def test_nested_folder_case_collision_detected_before_upload(self):
+        self.write(b"a", "Work/a.md")
+        self.reader.files["work/b.md"] = b"b"
+        with self.assertRaises(SyncError):
+            self.run_sync()
+        self.assertFalse(self.reader.writes)
+
+    def test_parent_symlink_cannot_be_used_for_download(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        try:
+            (self.notes / "linked").symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("Symlinks unavailable")
+        self.reader.files["linked/private.md"] = b"reader"
+        with self.assertRaises(SyncError):
+            self.run_sync()
+        self.assertFalse((outside / "private.md").exists())
+
+    def test_hidden_subfolders_are_ignored(self):
+        self.write(b"private", ".private/secret.md")
+        self.write(b"note", "public/note.md")
+        self.run_sync()
+        self.assertEqual(self.reader.files, {"public/note.md": b"note"})
+
+    def test_paths_reject_traversal_absolute_paths_and_empty_components(self):
+        for name in ("../a.md", "/a.md", "dir/../a.md", "dir//a.md", "dir/./a.md", "C:/a.md", "dir/", "dir\\a.md"):
+            with self.subTest(name=name), self.assertRaises(SyncError):
+                safe_relative(name)
+        with self.assertRaises(SyncError):
+            check_collisions({"note.md", "note.md/child.md"})
+        with self.assertRaises(SyncError):
+            check_collisions({"café/a.md", "cafe\u0301/b.md"})
 
     def test_second_process_lock_rejected(self):
         with sync_lock(self.history):
@@ -303,6 +381,26 @@ class SyncTests(unittest.TestCase):
 
 
 class HttpTests(unittest.TestCase):
+    def test_reader_recursively_discovers_notes(self):
+        reader = Reader("reader.test")
+        tree = {
+            "/OneDriveNotes": [{"name": "Work", "isDirectory": True}, {"name": ".hidden", "isDirectory": True}],
+            "/OneDriveNotes/Work": [{"name": "nested", "isDirectory": True}, {"name": "one.md", "isDirectory": False}],
+            "/OneDriveNotes/Work/nested": [{"name": "two.MARKDOWN", "isDirectory": False}, {"name": "pic.jpg", "isDirectory": False}],
+        }
+        reader.listing = lambda folder: tree[folder]
+        self.assertEqual(reader.notes(), {"Work/one.md", "Work/nested/two.MARKDOWN"})
+
+    def test_reader_rejects_malicious_directory_and_cross_directory_rename(self):
+        reader = Reader("reader.test")
+        reader.listing = lambda folder: [{"name": "../outside", "isDirectory": True}]
+        with self.assertRaises(SyncError):
+            reader.notes()
+        with self.assertRaises(SyncError):
+            reader.rename("Work/a.md", "Other/a.md")
+        with self.assertRaises(SyncError):
+            reader.remove_scratch("Work/real-note.md")
+
     def test_real_http_routes_encoding_and_multipart(self):
         received = []
 
@@ -342,12 +440,19 @@ class HttpTests(unittest.TestCase):
             self.assertEqual(reader.status()["device"], "X3")
             reader.ensure_folder()
             self.assertEqual(reader.read("日本語.md"), b"# Unicode note")
-            reader.upload("café.md", b"- [x] done\r\n")
-            reader.rename("old.md", "new.md")
+            reader.upload("Work/Tasks/café.md", b"- [x] done\r\n")
+            reader.rename("Work/Tasks/old.md", "Work/Tasks/new.md")
             self.assertIn(("/download", {"path": ["/OneDriveNotes/日本語.md"]}), received)
             upload = next(body for path, body in received if path.startswith("/api/upload"))
             self.assertIn('filename="café.md"'.encode(), upload)
             self.assertIn(b"- [x] done\r\n", upload)
+            upload_path = next(path for path, _ in received if path.startswith("/api/upload"))
+            self.assertEqual(parse_qs(urlsplit(upload_path).query), {"path": ["/OneDriveNotes/Work/Tasks"]})
+            mkdir_forms = [parse_qs(body.decode()) for path, body in received if path == "/mkdir"]
+            self.assertIn({"path": ["/OneDriveNotes"], "name": ["Work"]}, mkdir_forms)
+            self.assertIn({"path": ["/OneDriveNotes/Work"], "name": ["Tasks"]}, mkdir_forms)
+            rename_form = next(parse_qs(body.decode()) for path, body in received if path == "/rename")
+            self.assertEqual(rename_form, {"path": ["/OneDriveNotes/Work/Tasks/old.md"], "name": ["new.md"]})
             self.assertTrue(any(path == "/mkdir" for path, _ in received))
         finally:
             server.shutdown()

@@ -6,7 +6,7 @@ This works with the current BuddyPoint firmware (1.6.7); no firmware update is n
 
 ## First sync
 
-1. On the computer, create a dedicated folder in OneDrive, for example **BuddyPoint Notes**. Put your `.md` or `.markdown` notes directly inside it. Mark the folder **Always keep on this device** and let OneDrive finish downloading it.
+1. On the computer, create a dedicated folder in OneDrive, for example **BuddyPoint Notes**. Put your `.md` or `.markdown` notes inside it, including subfolders if desired. Mark the folder **Always keep on this device** and let OneDrive finish downloading it.
 2. Put the computer and X3 on the same trusted Wi-Fi network. Open **BuddySync** on the reader and start its connection. Keep that screen open during sync.
 3. Install Python 3.10 or newer if needed. Download [buddy_notes_sync.py](../companion/notes-sync/buddy_notes_sync.py), or use the copy in this repository.
 4. Run a preview, replacing the example folder with your actual folder:
@@ -20,7 +20,11 @@ This works with the current BuddyPoint firmware (1.6.7); no firmware update is n
 5. Run the same command without `--dry-run` to sync. If `haakanpoint.local` cannot be found, add `--device 192.168.1.42`, using the address shown on the reader. Continue using the same address/hostname for later runs.
 6. When sync finishes, leave BuddySync and open **Library → Markdown** on firmware **1.6.8 or newer**. That tab refreshes the index when first opened and shows notes separately from books, including notes in custom sync folders. On older firmware, use **Apps → Markdown viewer → OneDriveNotes**. Open a note and use its **Checklist** menu to tick tasks. Return to BuddySync and run the tool again to copy those edits back to the computer; OneDrive will then upload them to the cloud.
 
-This syncs Markdown files, not OneNote notebooks, Word files or images. The first version processes files directly inside the chosen folder; subfolders and hidden files are ignored. Each note can be up to 8 MiB. The reader directory defaults to `/OneDriveNotes`, separate from `/BuddyNotes` used by KOReader exports.
+This syncs Markdown files recursively, not OneNote notebooks, Word files or images. Subfolder paths are preserved in both directions: `Work/Tasks.md` becomes `/OneDriveNotes/Work/Tasks.md` on the reader. Required folders are created automatically; empty folders and hidden files/folders are not copied. Each note can be up to 8 MiB. Scans stop with an error beyond 32 path components or 10,000 entries rather than silently skipping deeper content. The reader directory defaults to `/OneDriveNotes`, separate from `/BuddyNotes` used by KOReader exports. Use `--reader-folder "/MyNotes"` to choose another destination.
+
+The firmware's Library index scans up to five folder levels below the SD root. Notes nested more deeply can still sync, but may require the Markdown file browser to locate them.
+
+If upgrading from the original top-level-only script, replace the script and rerun your existing command. Recursion is automatic, and existing top-level sync history and interrupted-transfer recovery remain compatible.
 
 ## Leave the tool running
 
@@ -34,7 +38,7 @@ It checks every 60 seconds and retries if the reader is asleep or disconnected. 
 
 - A new note on either side is copied to the other side.
 - Changes on just one side replace the unchanged copy on the other side.
-- If both copies changed, the computer version keeps the original filename. The reader version is saved on **both sides** as a separate `name.reader-conflict-<fingerprint>.md` note. This also applies to different files with the same name on the first sync.
+- If both copies changed, the computer version keeps the original filename. The reader version is saved on **both sides**, in the same subfolder, as a separate `name.reader-conflict-<fingerprint>.md` note. This also applies to different files at the same relative path on the first sync. Identical filenames in different subfolders are independent notes.
 - Deletions are **not propagated**. If a note exists on one side only, it is copied back to the other. To remove a note permanently, stop the sync tool and remove it from both sides.
 - Renaming a note is treated as a new filename. The old copy can reappear because deletion is not propagated.
 - Save and close active edits before syncing, and allow OneDrive to settle. The reader API has no transaction lock shared with other upload clients. Avoid concurrent transfers from another tool.
@@ -57,6 +61,6 @@ The reader's transfer server uses local HTTP without authentication. Run it on a
 python3 -m unittest discover -s companion/notes-sync -v
 ```
 
-Automated tests cover bidirectional edits, first-sync conflicts, empty/Unicode notes, deletion behavior, preview mode, interrupted uploads, changes during transfer, recovery, local backups, unsafe paths, duplicate names, process locking, and real HTTP request formatting against a local server.
+Automated tests cover recursive bidirectional edits, first-sync and nested conflicts, empty/Unicode notes, deletion behavior, preview mode, interrupted uploads, changes during transfer, nested recovery, local backups, unsafe paths and parent directory links, duplicate names, process locking, and real HTTP request formatting against a local server.
 
 Physical-device verification is still needed: upload a small note, open it on the X3, tick a checklist item, sync back, and confirm the changed file reaches OneDrive. Disconnect Wi-Fi during a test upload and rerun to check recovery on the real SD card.
