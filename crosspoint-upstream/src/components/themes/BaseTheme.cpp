@@ -726,18 +726,22 @@ Rect BaseTheme::drawPopup(const GfxRenderer& renderer, const char* message) cons
   const int x = (renderer.getScreenWidth() - w) / 2;
 
   const bool useRoundedPopup = metrics.popupCornerRadius > 0;
+  // The text flag is passed to drawText's `black` argument. Choose the
+  // opposite background independently of the popup's shape.
+  const bool textBlack = metrics.popupTextInverted;
   if (useRoundedPopup) {
     renderer.fillRoundedRect(x - frameThickness, y - frameThickness, w + frameThickness * 2, h + frameThickness * 2,
-                             metrics.popupCornerRadius + frameThickness, Color::White);
-    renderer.fillRoundedRect(x, y, w, h, metrics.popupCornerRadius, Color::Black);
+                             metrics.popupCornerRadius + frameThickness, textBlack ? Color::Black : Color::White);
+    renderer.fillRoundedRect(x, y, w, h, metrics.popupCornerRadius, textBlack ? Color::White : Color::Black);
   } else {
-    renderer.fillRect(x - frameThickness, y - frameThickness, w + frameThickness * 2, h + frameThickness * 2, true);
-    renderer.fillRect(x, y, w, h, false);
+    renderer.fillRect(x - frameThickness, y - frameThickness, w + frameThickness * 2, h + frameThickness * 2,
+                      textBlack);
+    renderer.fillRect(x, y, w, h, !textBlack);
   }
 
   const int textX = x + (w - textWidth) / 2;
   const int textY = y + marginY + metrics.popupTextBaselineOffsetY;
-  renderer.drawText(UI_12_FONT_ID, textX, textY, message, metrics.popupTextInverted, popupFontFamily);
+  renderer.drawText(UI_12_FONT_ID, textX, textY, message, textBlack, popupFontFamily);
   renderer.displayBuffer();
   return Rect{x, y, w, h};
 }
