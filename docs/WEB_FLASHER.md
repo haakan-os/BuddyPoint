@@ -27,6 +27,8 @@ Or, after building `crosspoint-upstream` directly:
 
 ```sh
 python3 scripts/package_web_firmware.py
+# Or package a production build:
+python3 scripts/package_web_firmware.py --environment gh_release
 ```
 
 Review and commit `web-flasher/firmware/` together with the corresponding source changes. The manifest records the application's build time and each file's size, offset, and SHA-256.
@@ -50,4 +52,4 @@ Update `vendor/NOTICE.txt` if licenses change.
 
 For a device check, use desktop Chrome/Edge with a data cable, connect the X3, install the included build, wait for the verified completion message, and confirm the reader restarts and opens a book. If reset fails after verification, restart the reader manually. Keep the cable connected while writing. A failed install requires reconnecting before retrying.
 
-This work changes USB installation only. The firmware's existing OTA update source has not been switched to BuddyPoint releases.
+The bundled firmware also points its OTA updater at BuddyPoint releases. Older installations need this build installed once over USB to switch feeds. See [OTA updates](OTA_UPDATES.md).

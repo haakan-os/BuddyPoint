@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Package a completed default build for the static browser flasher."""
+"""Package a completed X3/X4 build for the static browser flasher."""
+import argparse
 import hashlib
 import json
 import struct
@@ -7,18 +8,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-BUILD = ROOT / 'crosspoint-upstream/.pio/build/default'
 DEST = ROOT / 'web-flasher/firmware'
 
 
 def main():
-    app = (BUILD / 'firmware.bin').read_bytes()
-    factory = (BUILD / 'firmware.factory.bin').read_bytes()
-    bootloader = (BUILD / 'bootloader.bin').read_bytes()
-    partitions = (BUILD / 'partitions.bin').read_bytes()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--environment', choices=('default', 'gh_release'), default='default')
+    args = parser.parse_args()
+    build = ROOT / 'crosspoint-upstream/.pio/build' / args.environment
+    app = (build / 'firmware.bin').read_bytes()
+    factory = (build / 'firmware.factory.bin').read_bytes()
+    bootloader = (build / 'bootloader.bin').read_bytes()
+    partitions = (build / 'partitions.bin').read_bytes()
     if not (app[0] == 0xe9 and struct.unpack_from('<H', app, 12)[0] == 5
             and b'CROSSPOINT-BOARD-V1:x4;' in app and len(app) <= 0x640000):
-        raise SystemExit('Expected a default ESP32-C3 X3/X4 application build.')
+        raise SystemExit('Expected an ESP32-C3 X3/X4 application build.')
     expected = [
         (1, 2, 0x9000, 0x5000), (1, 0, 0xe000, 0x2000),
         (0, 0x10, 0x10000, 0x640000), (0, 0x11, 0x650000, 0x640000),
@@ -42,7 +46,7 @@ def main():
     manifest = {
         'name': 'BuddyPoint — BuddySync, themes, Sudoku & Markdown',
         'chip': 'ESP32-C3', 'flashSize': '16MB',
-        'builtAt': datetime.fromtimestamp((BUILD / 'firmware.bin').stat().st_mtime, timezone.utc).isoformat(),
+        'builtAt': datetime.fromtimestamp((build / 'firmware.bin').stat().st_mtime, timezone.utc).isoformat(),
         'parts': [],
     }
     for name, offset, data in parts:

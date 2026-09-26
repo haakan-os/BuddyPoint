@@ -81,3 +81,5 @@ add_subdirectory(buddy_sync)
 add_subdirectory(sudoku)
 
 add_subdirectory(markdown)
+
+add_subdirectory(ota_release)

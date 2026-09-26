@@ -10,6 +10,7 @@ A CrossPoint-based firmware for the **Xteink X3**, with enhanced KOReader sync, 
 - **Custom themes:** Retro Mac, NeXTSTEP, and Windows 95 styles alongside the CrossPoint themes.
 - **Apps:** Sudoku with saved games and a Markdown viewer.
 - **Markdown reading:** open `.md` and `.markdown` files from the SD card, with headings, lists, code blocks, and reading progress. See the [viewer guide](crosspoint-upstream/docs/markdown.md).
+- **OTA updates:** download stable releases from this BuddyPoint repository. See the [OTA guide](docs/OTA_UPDATES.md) for the one-time migration and release process.
 - **USB web flasher:** install the included firmware or a compatible application build, with device checks, real progress, and verification of the written data.
 
 ## Install
