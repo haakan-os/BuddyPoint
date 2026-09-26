@@ -1,0 +1,25 @@
+name: Notes and checklist tests
+on:
+  push:
+    branches: [main]
+    paths: ['crosspoint-upstream/**', 'koreader-plugin/**', 'scripts/test*.lua', '.github/workflows/feature-tests.yml']
+  pull_request:
+    paths: ['crosspoint-upstream/**', 'koreader-plugin/**', 'scripts/test*.lua', '.github/workflows/feature-tests.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install host test dependencies
+        run: sudo apt-get update && sudo apt-get install -y lua5.4 libexpat1-dev zlib1g-dev
+      - name: Test KOReader notes and transfers
+        run: lua scripts/test_notes.lua
+      - name: Test Markdown and OTA
+        run: |
+          cmake -S crosspoint-upstream/test -B /tmp/tests
+          cmake --build /tmp/tests --target MarkdownChecklistTest MarkdownDocumentTest MarkdownTest OtaReleaseTest ReleaseJsonParserTest -j2
+          ctest --test-dir /tmp/tests -R '^(Markdown|OtaRelease|ReleaseJsonParser)' --output-on-failure

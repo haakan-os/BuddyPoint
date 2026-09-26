@@ -13,6 +13,7 @@ namespace mdtest {
 inline std::map<std::string, std::vector<uint8_t>> files;
 inline std::set<std::string> directories;
 inline std::string failWriteSuffix;
+inline std::string failRenameTo;
 inline bool failRead = false;
 inline bool failClose = false;
 inline size_t writes = 0;
@@ -20,6 +21,7 @@ inline void reset() {
   files.clear();
   directories.clear();
   failWriteSuffix.clear();
+  failRenameTo.clear();
   failRead = false;
   failClose = false;
   writes = 0;
@@ -84,7 +86,7 @@ class HalStorage {
   }
   bool remove(const char* path) { return mdtest::files.erase(path) != 0; }
   bool rename(const char* from, const char* to) {
-    if (!mdtest::files.contains(from) || mdtest::files.contains(to)) return false;
+    if (mdtest::failRenameTo == to || !mdtest::files.contains(from) || mdtest::files.contains(to)) return false;
     mdtest::files[to] = std::move(mdtest::files.at(from));
     mdtest::files.erase(from);
     return true;

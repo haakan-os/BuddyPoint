@@ -9,8 +9,8 @@ class AppsActivity final : public UiListActivity {
   AppsActivity(GfxRenderer& renderer, MappedInputManager& input) : UiListActivity("Apps", renderer, input) {}
 
  private:
-  freeink::ui::ListItem rows[2]{};
-  int listCount() const override { return 2; }
+  freeink::ui::ListItem rows[3]{};
+  int listCount() const override { return 3; }
   const char* headerTitle() const override { return tr(STR_APPS); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;

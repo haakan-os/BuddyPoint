@@ -40,6 +40,7 @@
 #include "ReaderUtils.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "activities/apps/MarkdownChecklistActivity.h"
 #include "activities/settings/TextSettingsActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -911,6 +912,18 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         pendingScreenshot = true;
       }
       requestUpdate();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::CHECKLIST: {
+      if (!FsHelpers::hasMarkdownExtension(bookPath)) break;
+      // The manager owns this fixed-size task list for its screen lifetime; allocation can fail safely.
+      auto activity = makeUniqueNoThrow<MarkdownChecklistActivity>(renderer, mappedInput, bookPath);
+      if (!activity) {
+        LOG_ERR("TASKS", "OOM: checklist activity");
+        break;
+      }
+      // Release the reader's page buffers while editing; Back reopens and refreshes the Markdown cache.
+      activityManager.replaceActivity(std::move(activity));
       break;
     }
     case EpubReaderMenuActivity::MenuAction::SYNC: {

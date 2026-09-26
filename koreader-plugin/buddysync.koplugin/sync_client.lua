@@ -1,7 +1,6 @@
 local http = require("socket.http")
 local ltn12 = require("ltn12")
 local json = require("json")
-local socket = require("socket")
 local mime = require("mime")
 local logger = require("logger")
 
@@ -43,7 +42,9 @@ function SyncClient:pingX3()
 end
 
 -- Upload an EPUB file directly to Xteink X3 via HTTP multipart
-function SyncClient:uploadBookToX3(filepath, filename)
+function SyncClient:uploadBookToX3(filepath, filename, options)
+    options = options or {}
+    if filename and filename:find('[\r\n"/\\]') then return false, "Invalid filename" end
     local file = io.open(filepath, "rb")
     if not file then
         return false, "Could not open local book file"
@@ -57,7 +58,7 @@ function SyncClient:uploadBookToX3(filepath, filename)
     
     local header = "--" .. boundary .. "\r\n" ..
                    'Content-Disposition: form-data; name="file"; filename="' .. clean_name .. '"\r\n' ..
-                   "Content-Type: application/epub+zip\r\n\r\n"
+                   "Content-Type: " .. (options.notes and "text/markdown; charset=utf-8" or "application/epub+zip") .. "\r\n\r\n"
     local footer = "\r\n--" .. boundary .. "--\r\n"
     
     local total_len = #header + filesize + #footer
@@ -84,6 +85,7 @@ function SyncClient:uploadBookToX3(filepath, filename)
     
     local clean_host = self.x3_host:gsub("^https?://", ""):gsub("/+$", "")
     local url = "http://" .. clean_host .. "/api/upload?overwrite=true"
+    if options.notes then url = url .. "&path=%2FBuddyNotes" end
     local response_body = {}
     http.TIMEOUT = 300
     
@@ -157,11 +159,10 @@ function SyncClient:pushProgress(document_hash, progress_pct, spine_index, xpath
         percentage = progress_pct,
         timestamp = os.time(),
         device = "koreader-kindle",
-        progress_detail = {
-            spine = spine_index or 0,
-            xpath = xpath or "",
-        }
     }
+    if spine_index ~= nil or xpath ~= nil then
+        payload.progress_detail = { spine = spine_index or 0, xpath = xpath or "" }
+    end
     
     local body = json.encode(payload)
     local response_body = {}

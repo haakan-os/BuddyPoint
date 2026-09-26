@@ -19,6 +19,8 @@ void AppsActivity::buildScreen(UiScreen& screen) {
   rows[0].actionValue = 0;
   rows[1].label = tr(STR_MARKDOWN_VIEWER);
   rows[1].actionValue = 1;
+  rows[2].label = tr(STR_READING_NOTES);
+  rows[2].actionValue = 2;
   fui::ListProps props;
   props.items = rows;
   props.count = listCount();
@@ -35,7 +37,8 @@ void AppsActivity::activateIndex(int index) {
   if (index == 0)
     activity = makeUniqueNoThrow<SudokuActivity>(renderer, mappedInput);
   else
-    activity = makeUniqueNoThrow<FileBrowserActivity>(renderer, mappedInput, "/", FileBrowserActivity::Mode::Markdown);
+    activity = makeUniqueNoThrow<FileBrowserActivity>(renderer, mappedInput, index == 2 ? "/BuddyNotes" : "/",
+                                                      FileBrowserActivity::Mode::Markdown);
   if (!activity) {
     LOG_ERR("APPS", "OOM: app activity");
     return;

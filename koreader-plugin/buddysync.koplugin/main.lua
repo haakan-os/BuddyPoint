@@ -10,164 +10,11 @@ local _ = require("gettext")
 
 local ReadHistory = require("readhistory")
 local DocSettings = require("docsettings")
-local http = require("socket.http")
-local ltn12 = require("ltn12")
-local json = require("json")
-local mime = require("mime")
-
-local ok_opt, EpubOptimizer = pcall(require, "epub_optimizer")
-if not ok_opt then
-    local plugin_dir = debug.getinfo(1).source:match("@?(.*/)")
-    package.path = package.path .. ";" .. plugin_dir .. "?.lua"
-    EpubOptimizer = require("epub_optimizer")
-end
-
--- Embedded Sync Client
-local SyncClient = {}
-
-function SyncClient:new(x3_host, kosync_server, username, password_md5)
-    local o = {
-        x3_host = x3_host or "haakanpoint.local",
-        kosync_server = kosync_server or "https://sync.koreader.rocks",
-        username = username or "",
-        password_md5 = password_md5 or "",
-        timeout = 5,
-    }
-    setmetatable(o, { __index = self })
-    return o
-end
-
-function SyncClient:pingX3()
-    local url = "http://" .. self.x3_host .. "/api/status"
-    local response_body = {}
-    http.TIMEOUT = self.timeout
-    
-    local ok, status_code = pcall(function()
-        local _, code = http.request{
-            url = url,
-            method = "GET",
-            sink = ltn12.sink.table(response_body),
-        }
-        return code
-    end)
-    
-    if ok and status_code == 200 then
-        local raw = table.concat(response_body)
-        local parse_ok, data = pcall(json.decode, raw)
-        if parse_ok and data then return true, data end
-    end
-    return false, nil
-end
-
-function SyncClient:uploadBookToX3(filepath, filename)
-    local file = io.open(filepath, "rb")
-    if not file then
-        return false, "Could not open local book file"
-    end
-    
-    local filesize = file:seek("end")
-    file:seek("set", 0)
-    
-    local clean_name = filename or "book.epub"
-    local boundary = "----BuddySyncBoundary" .. tostring(os.time())
-    
-    local header = "--" .. boundary .. "\r\n" ..
-                   'Content-Disposition: form-data; name="file"; filename="' .. clean_name .. '"\r\n' ..
-                   "Content-Type: application/epub+zip\r\n\r\n"
-    local footer = "\r\n--" .. boundary .. "--\r\n"
-    
-    local total_len = #header + filesize + #footer
-    
-    local CHUNK_SIZE = 32768
-    local header_sent = false
-    local footer_sent = false
-    
-    local custom_source = function()
-        -- HTTP asks for EOF after consuming the multipart footer.
-        if footer_sent then return nil end
-        if not header_sent then
-            header_sent = true
-            return header
-        end
-        local chunk, read_error = file:read(CHUNK_SIZE)
-        if chunk then
-            return chunk
-        end
-        footer_sent = true
-        if read_error then return nil, read_error end
-        return footer
-    end
-    
-    local clean_host = self.x3_host:gsub("^https?://", ""):gsub("/+$", "")
-    local url = "http://" .. clean_host .. "/api/upload?overwrite=true"
-    local response_body = {}
-    http.TIMEOUT = 300
-    
-    local ok, status_code = pcall(function()
-        local _, code = http.request{
-            url = url,
-            method = "POST",
-            headers = {
-                ["Content-Type"] = "multipart/form-data; boundary=" .. boundary,
-                ["Content-Length"] = tostring(total_len),
-            },
-            source = custom_source,
-            sink = ltn12.sink.table(response_body),
-        }
-        return code
-    end)
-    
-    -- Own the handle here so success and early request failures close it once.
-    pcall(function() file:close() end)
-    
-    if ok and (status_code == 200 or status_code == 302) then
-        return true, "Successfully transferred to Xteink X3"
-    else
-        local resp = table.concat(response_body)
-        local err_detail = (resp and resp ~= "") and resp or ("Status: " .. tostring(status_code))
-        return false, "Upload failed (" .. err_detail .. ")"
-    end
-end
-
-function SyncClient:pushProgress(document_hash, progress_pct)
-    if not document_hash or document_hash == "" then return false end
-    local url = self.kosync_server .. "/users/progress"
-    
-    local payload = {
-        document = document_hash,
-        progress = progress_pct / 100.0,
-        percentage = progress_pct,
-        timestamp = os.time(),
-        device = "koreader-kindle",
-    }
-    
-    local body = json.encode(payload)
-    local response_body = {}
-    http.TIMEOUT = self.timeout
-    
-    local auth_header = ""
-    if self.username and self.username ~= "" then
-        auth_header = "Basic " .. mime.b64(self.username .. ":" .. self.password_md5)
-    end
-    
-    local ok, status_code = pcall(function()
-        local _, code = http.request{
-            url = url,
-            method = "PUT",
-            headers = {
-                ["Content-Type"] = "application/json",
-                ["Accept"] = "application/vnd.koreader.v1+json",
-                ["Authorization"] = auth_header,
-                ["Content-Length"] = tostring(#body),
-            },
-            source = ltn12.source.string(body),
-            sink = ltn12.sink.table(response_body),
-        }
-        return code
-    end)
-    
-    return ok and (status_code == 200 or status_code == 201)
-end
+local plugin_dir = debug.getinfo(1).source:match("@?(.*/)")
+package.path = package.path .. ";" .. plugin_dir .. "?.lua"
+local EpubOptimizer = require("epub_optimizer")
+local SyncClient = require("sync_client")
+local NotesExporter = require("notes_exporter")
 
 -- Plugin Definition
 local BuddySyncPlugin = WidgetContainer:extend{
@@ -192,6 +39,8 @@ function BuddySyncPlugin:init()
     if self.settings.optimize_epub == nil then
         self.settings.optimize_epub = true
     end
+
+    if self.settings.sync_notes_with_books == nil then self.settings.sync_notes_with_books = true end
 
     self.client = SyncClient:new(
         self.settings.x3_host,
@@ -267,6 +116,18 @@ function BuddySyncPlugin:addToMainMenu(menu_items)
                 end,
             },
             {
+                text = _("Send Current Notes to X3"),
+                callback = function() self:sendCurrentNotes() end,
+            },
+            {
+                text = _("Send Notes with Books"),
+                checked_func = function() return self.settings.sync_notes_with_books end,
+                callback = function()
+                    self.settings.sync_notes_with_books = not self.settings.sync_notes_with_books
+                    self:saveSettings()
+                end,
+            },
+            {
                 text = _("Sync Reading Position Now"),
                 callback = function()
                     self:syncPositionNow()
@@ -312,6 +173,43 @@ function BuddySyncPlugin:addToMainMenu(menu_items)
             },
         }
     }
+end
+
+function BuddySyncPlugin:transferNotes(path, client)
+    local output
+    local call_ok, sent, detail = pcall(function()
+        local current = self.ui and self.ui.document and self.ui.document.file == path
+        local settings = current and self.ui.doc_settings or DocSettings:open(path)
+        if not settings then return false, _("Could not read book notes.") end
+        local live = current and self.ui.annotation and self.ui.annotation.annotations
+        local annotations = NotesExporter.annotations(settings, live)
+        local props = settings:readSetting("doc_props") or {}
+        local title = props.title or path:match("([^/]+)$") or "Book"
+        local filename = NotesExporter.filename(path)
+        output = os.tmpname()
+        local ok, count = NotesExporter.write(output, title, props.authors, annotations)
+        if not ok then return false, count end
+        local uploaded, message = client:uploadBookToX3(output, filename, { notes = true })
+        return uploaded, uploaded and tostring(count) or message
+    end)
+    if output then os.remove(output) end
+    if not call_ok then return false, tostring(sent) end
+    return sent, detail
+end
+
+function BuddySyncPlugin:sendCurrentNotes()
+    if not self.ui or not self.ui.document then
+        UIManager:show(InfoMessage:new{ text = _("Please open a book first.") })
+        return
+    end
+    local path, client = self.ui.document.file, self.client
+    UIManager:show(Notification:new{ text = _("Sending notes to X3...") })
+    UIManager:scheduleIn(0.2, function()
+        local ok, detail = self:transferNotes(path, client)
+        UIManager:show(InfoMessage:new{ text = ok
+            and (_("Notes sent. Open Apps → Reading notes on BuddyPoint. Entries: ") .. detail)
+            or (_("Notes transfer failed: ") .. tostring(detail)) })
+    end)
 end
 
 function BuddySyncPlugin:sendCurrentBook()
@@ -404,6 +302,11 @@ function BuddySyncPlugin:sendCurrentBook()
         else
             result_text = _("Transfer Failed: ") .. tostring(msg)
         end
+        if ok and self.settings.sync_notes_with_books then
+            local notes_ok, detail = self:transferNotes(doc_path, client)
+            result_text = result_text .. (notes_ok and _("\nNotes sent too.")
+                or (_("\nBook sent, but notes failed: ") .. tostring(detail)))
+        end
         UIManager:show(InfoMessage:new{ text = result_text })
     end)
 end
@@ -426,7 +329,7 @@ function BuddySyncPlugin:syncActiveShelf()
     local should_optimize = self.settings.optimize_epub
 
     UIManager:scheduleIn(0.5, function()
-        local success_count = 0
+        local success_count, notes_failed = 0, 0
         for book_index, book in ipairs(active) do
             local filename = book.path:match("([^/]+)$") or "book.epub"
             local upload_path = book.path
@@ -454,11 +357,18 @@ function BuddySyncPlugin:syncActiveShelf()
                 pcall(function() os.remove(cleanup_file) end)
             end
 
-            if ok then success_count = success_count + 1 end
+            if ok then
+                success_count = success_count + 1
+                if self.settings.sync_notes_with_books then
+                    local notes_ok = self:transferNotes(book.path, client)
+                    if not notes_ok then notes_failed = notes_failed + 1 end
+                end
+            end
         end
 
         UIManager:show(InfoMessage:new{
-            text = string.format(_("Shelf Sync Complete!\nSuccessfully synced %d of %d books to your Xteink X3."), success_count, #active),
+            text = string.format(_("Shelf Sync Complete!\nSuccessfully synced %d of %d books to your Xteink X3."), success_count, #active) ..
+                (notes_failed > 0 and string.format(_("\nNotes failed for %d books. Retry from Send Current Notes."), notes_failed) or ""),
         })
     end)
 end

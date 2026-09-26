@@ -44,7 +44,7 @@ def main():
              ('boot_app0.bin', 0xe000, factory[0xe000:0x10000]), ('firmware.bin', 0x10000, app)]
     DEST.mkdir(parents=True, exist_ok=True)
     manifest = {
-        'name': 'BuddyPoint — BuddySync, themes, Sudoku & Markdown',
+        'name': 'BuddyPoint — notes sync, themes, Sudoku & Markdown checklists',
         'chip': 'ESP32-C3', 'flashSize': '16MB',
         'builtAt': datetime.fromtimestamp((build / 'firmware.bin').stat().st_mtime, timezone.utc).isoformat(),
         'parts': [],

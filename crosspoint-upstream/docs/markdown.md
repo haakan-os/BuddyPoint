@@ -2,13 +2,13 @@
 
 Open **Apps → Markdown viewer** to browse Markdown documents. Files with `.md` or `.markdown` extensions (including uppercase variants) also open from the regular file browser and Library. Rebuild the library index if a newly added document is not yet listed.
 
-Use the normal reader controls for page turns, text settings, orientation, bookmarks and saved position. The reader's Contents/Select chapter menu lists document headings. The original Markdown file remains unchanged.
+Use the normal reader controls for page turns, text settings, orientation, bookmarks and saved position. The reader's Contents/Select chapter menu lists document headings. Reading leaves the original file unchanged. Use the reader menu’s **Checklist** action to toggle task markers and save them to the original Markdown file. See [Notes and checklists](../../docs/NOTES_AND_CHECKLISTS.md).
 
 ## Supported formatting
 
 - ATX headings (`#` through `######`) and underlined headings.
 - Bold, italic, combined emphasis and inline code.
-- Unordered and ordered lists. Task markers remain visible as `[ ]` and `[x]`.
+- Unordered and ordered lists. Task markers remain visible as `[ ]` and `[x]`; the Checklist menu makes supported task lists editable.
 - Blockquotes and horizontal rules.
 - Fenced and indented code with explicit line breaks and preserved spaces.
 - Simple pipe tables, laid out by the existing adaptive table renderer.

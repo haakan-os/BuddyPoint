@@ -539,3 +539,9 @@ STR_SUDOKU_COMPLETE: "Puzzle complete! Open Menu to start another."
 
 STR_MARKDOWN_VIEWER: "Markdown viewer"
 STR_PREPARING_DOCUMENT: "Preparing document..."
+
+STR_READING_NOTES: "Reading notes"
+STR_CHECKLIST: "Checklist"
+STR_CHECKLIST_EMPTY: "No tasks found. Use - [ ] in Markdown."
+STR_CHECKLIST_SAVE_FAILED: "Could not save. Reopen the checklist and try again."
+STR_CHECKLIST_LIMIT: "Checklist (first 128)"

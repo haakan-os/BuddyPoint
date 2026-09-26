@@ -1,6 +1,7 @@
 #include "CrossPointWebServer.h"
 
 #include <ArduinoJson.h>
+#include <AtomicFile.h>
 #include <BoardConfig.h>
 #include <FsHelpers.h>
 #include <HalGPIO.h>
@@ -702,8 +703,9 @@ void CrossPointWebServer::discardHttpUpload(UploadState& state) {
     String filePath = state.path;
     if (!filePath.endsWith("/")) filePath += "/";
     filePath += state.fileName;
-    Storage.remove(filePath.c_str());
+    Storage.remove(state.stagingPath.isEmpty() ? filePath.c_str() : state.stagingPath.c_str());
   }
+  state.stagingPath = "";
   state.bufferPos = 0;
   state.inProgress = false;
 }
@@ -773,12 +775,22 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     if (!filePath.endsWith("/")) filePath += "/";
     filePath += state.fileName;
 
+    const bool notesUpload = state.path == "/BuddyNotes" && FsHelpers::hasMarkdownExtension(state.fileName.c_str());
+    if (notesUpload) {
+      if (!Storage.ensureDirectoryExists("/BuddyNotes") || !atomic_file::recover(filePath.c_str())) {
+        state.error = "Could not prepare notes folder";
+        state.inProgress = false;
+        return;
+      }
+      state.stagingPath = filePath + ".buddy-part";
+    }
+
     // Check if file already exists - SD operations can be slow
     resetTaskWatchdogIfSubscribed();
     const bool allowOverwrite =
         (server->hasArg("overwrite") && (server->arg("overwrite") == "true" || server->arg("overwrite") == "1")) ||
         (server->uri() == "/api/upload");
-    if (Storage.exists(filePath.c_str())) {
+    if (state.stagingPath.isEmpty() && Storage.exists(filePath.c_str())) {
       if (allowOverwrite) {
         LOG_DBG("WEB", "[UPLOAD] Overwriting existing file: %s", filePath.c_str());
         Storage.remove(filePath.c_str());
@@ -792,7 +804,7 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
 
     // Open file for writing - this can be slow due to FAT cluster allocation
     resetTaskWatchdogIfSubscribed();
-    if (!Storage.openFileForWrite("WEB", filePath, state.file)) {
+    if (!Storage.openFileForWrite("WEB", state.stagingPath.isEmpty() ? filePath : state.stagingPath, state.file)) {
       state.error = "Failed to create file on SD card";
       state.inProgress = false;
       LOG_DBG("WEB", "[UPLOAD] FAILED to create file: %s", filePath.c_str());
@@ -848,7 +860,16 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
         state.error = "Failed to write final data to SD card";
         discardHttpUpload(state);
       }
-      state.file.close();
+      if (!state.file.close() && state.error.isEmpty()) state.error = "Could not finish writing file";
+      if (!state.stagingPath.isEmpty()) {
+        const String target = state.path + "/" + state.fileName;
+        if (state.error.isEmpty() && state.size != upload.totalSize) state.error = "Incomplete notes transfer";
+        if (state.error.isEmpty() && !atomic_file::publish(target.c_str(), state.stagingPath.c_str())) {
+          state.error = "Could not replace notes; previous copy preserved";
+        }
+        Storage.remove(state.stagingPath.c_str());
+        state.stagingPath = "";
+      }
 
       if (state.error.isEmpty()) {
         state.success = true;

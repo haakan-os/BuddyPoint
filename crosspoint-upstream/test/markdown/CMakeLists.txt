@@ -8,3 +8,8 @@ add_executable(MarkdownDocumentTest MarkdownDocumentTest.cpp ../../lib/Markdown/
 target_include_directories(MarkdownDocumentTest PRIVATE stubs ../../lib/Markdown ../../lib/Serialization ../../lib/Memory)
 target_link_libraries(MarkdownDocumentTest PRIVATE crosspoint_test_common GTest::gtest_main ZLIB::ZLIB expat)
 gtest_discover_tests(MarkdownDocumentTest)
+
+add_executable(MarkdownChecklistTest MarkdownChecklistTest.cpp ../../lib/Markdown/MarkdownChecklist.cpp)
+target_include_directories(MarkdownChecklistTest PRIVATE stubs ../../lib/Markdown ../../lib/AtomicFile ../../lib/Serialization ../../lib/Memory)
+target_link_libraries(MarkdownChecklistTest PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(MarkdownChecklistTest)
