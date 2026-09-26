@@ -42,8 +42,8 @@ class MathTests(unittest.TestCase):
         self.assertIn(b'media-type="image/jpeg"', book.read("content.opf"))
         self.assertEqual(render_note(source, "Notes & equations"), bundle)
 
-    def test_code_and_inline_math_and_unclosed_blocks_are_unchanged(self):
-        for source in (b'```tex\n$$x^2$$\n```', b'    $$x^2$$\n', b'Text $x^2$ and `$$x$$`.',
+    def test_code_currency_and_unclosed_blocks_are_unchanged(self):
+        for source in (b'```tex\n$$x^2$$\n```', b'    $$x^2$$\n', b'Text `$$x$$` and `$x$`.', b'Pay $5 and $10.', b'Escaped \\$x\\$ dollars.',
                        b'$$\nx^2\n', b'Costs $$5 today.'):
             self.assertIsNone(render_note(source, "Code"))
 
@@ -73,6 +73,109 @@ class MathTests(unittest.TestCase):
         _, book = self.book(b'$$' + b'x' * 4097 + b'$$', messages)
         self.assertTrue(messages)
         self.assertNotIn("math-0.jpg", book.namelist())
+
+
+    def test_matrices_cases_cancel_and_text_comparisons(self):
+        expressions = [
+            r"\begin{pmatrix} n \\ r \end{pmatrix} \times r! = \frac{n!}{(n-r)!}",
+            r"g(x)=\begin{cases}1-(x-1)^2 & \text{for x < 0} \\ e^{x^2} & \text{for x = 0} \\ 0 & \text{for x > 0}\end{cases}",
+            r"\lim_{x \to4}\frac{(x+1)\cancel{(x-4)}}{(x-2)\cancel{(x-4)}}",
+            r"\frac{-\cancel2x}{\cancel2\sqrt{4-x^2}}",
+            r"\text{A & B < C} \quad x \in \Bbb{R}",
+        ]
+        for expression in expressions:
+            with self.subTest(expression=expression):
+                warnings = []
+                _, book = self.book(('$$' + expression + '$$').encode(), warnings)
+                self.assertEqual(warnings, [])
+                self.assertIn('math-0.jpg', book.namelist())
+
+    def test_adjacent_and_prose_embedded_displays_preserve_order(self):
+        warnings = []
+        _, book = self.book(b'Before $$x=1$$$$y=2$$ after.\n\n$$z=3$$ next $$w=4$$', warnings)
+        self.assertEqual(warnings, [])
+        root = ET.fromstring(book.read('content.xhtml'))
+        labels = [node.attrib['alt'] for node in root.iter() if node.tag.endswith('}img')]
+        self.assertEqual([text.strip() for text in labels], ['Before', 'x=1', 'y=2', 'after.', 'z=3', 'next', 'w=4'])
+
+    def test_adjacent_display_can_continue_on_following_lines(self):
+        warnings = []
+        _, book = self.book(b'$$a=1$$ $$\nb=2\n$$', warnings)
+        self.assertEqual(warnings, [])
+        root = ET.fromstring(book.read('content.xhtml'))
+        labels = [node.attrib['alt'] for node in root.iter() if node.tag.endswith('}img')]
+        self.assertEqual(labels, ['a=1', 'b=2'])
+
+    def test_multiline_blocks_beginning_beside_delimiter_and_blank_lines(self):
+        source = b'$$\\begin{pmatrix}\n n \\\\n\n r\n\\end{pmatrix}\n$$\n\nEnd'
+        messages = []
+        _, book = self.book(source, messages)
+        self.assertEqual(messages, [])
+        self.assertIn('math-0.jpg', book.namelist())
+        self.assertIn(b'End', book.read('content.xhtml'))
+
+    def test_inline_math_shares_wrapped_lines_with_text_and_code(self):
+        source = b'Point $A$ is at $x=\\frac{11}{4}$; **bold** and `code $literal$`. ' * 3
+        messages = []
+        _, book = self.book(source, messages)
+        self.assertEqual(messages, [])
+        root = ET.fromstring(book.read('content.xhtml'))
+        labels = [node.attrib['alt'] for node in root.iter() if node.tag.endswith('}img')]
+        self.assertTrue(labels[0].startswith('Point A is at'))
+        self.assertIn('code $literal$', ''.join(labels))
+        self.assertGreater(len(labels), 1)
+        from PIL import Image
+        for name in book.namelist():
+            if name.endswith('.jpg'):
+                self.assertEqual(Image.open(BytesIO(book.read(name))).width, 432)
+
+    def test_malformed_commands_stay_text_without_stopping_the_note(self):
+        for expression in [r'\frac{1}', r'x^', r'\begin{cases}x', r'\notacommand{x}']:
+            warnings = []
+            _, book = self.book(('$$'+expression+'$$\n\n$$x^2$$').encode(), warnings)
+            self.assertTrue(warnings)
+            self.assertIn(expression.encode(), book.read('content.xhtml'))
+            self.assertIn('math-0.jpg', book.namelist())
+
+    def test_table_math_falls_back_to_text(self):
+        warnings = []
+        _, book = self.book(b'| A | B |\n|---|---|\n| $x^2$ | text |', warnings)
+        self.assertTrue(warnings)
+        self.assertIn(b'x^2', book.read('content.xhtml'))
+
+
+    def test_wide_equality_chains_wrap_without_dropping_terms(self):
+        expression = r"\frac{dy}{du}=\frac{1}{2}(u)^{\frac{1}{2}-1}=\frac{1}{2}\times\frac{1}{(u)^{\frac{1}{2}}}=\frac{1}{2\sqrt{u}}=\frac{1}{2\sqrt{4-x^2}}"
+        warnings = []
+        _, book = self.book(('$$'+expression+'$$').encode(), warnings)
+        self.assertEqual(warnings, [])
+        root = ET.fromstring(book.read('content.xhtml'))
+        labels = [node.attrib['alt'] for node in root.iter() if node.tag.endswith('}img')]
+        self.assertGreater(len(labels), 1)
+        self.assertEqual(''.join(labels), expression)
+        self.assertTrue(all(label.startswith('=') for label in labels[1:]))
+
+    def test_large_study_note_exceeds_old_128_equation_limit(self):
+        source = '\n'.join(f'$$x={i}$$' for i in range(150)).encode()
+        warnings = []
+        _, book = self.book(source, warnings)
+        self.assertEqual(warnings, [])
+        self.assertEqual(sum(name.endswith('.jpg') for name in book.namelist()), 150)
+
+    def test_extra_escaped_newline_in_cases_row(self):
+        expression = r'\begin{cases}1 & \text{for x < 0}' + '\\' * 3 + '\n' + r'0 & \text{for x > 0}\end{cases}'
+        warnings = []
+        _, book = self.book(('$$'+expression+'$$').encode(), warnings)
+        self.assertEqual(warnings, [])
+        self.assertIn('math-0.jpg', book.namelist())
+
+    def test_advanced_example_renders_without_fallbacks(self):
+        source = (Path(__file__).parent / 'examples' / 'advanced-math.md').read_bytes()
+        warnings = []
+        _, book = self.book(source, warnings)
+        self.assertEqual(warnings, [])
+        self.assertGreater(sum(name.endswith('.jpg') for name in book.namelist()), 15)
+
 
 
 class MathSyncTests(unittest.TestCase):
@@ -137,12 +240,12 @@ class MathSyncTests(unittest.TestCase):
     def test_old_renderer_cache_refreshes_unchanged_note_automatically(self):
         self.sync()
         target = sidecar_name(self.name)
-        # Model a v1 PNG bundle left on the reader and in the old local cache.
-        old_bundle = MAGIC + b"old generated PNG reading copy"
+        # Model a v2 JPEG bundle left on the reader and in the old local cache.
+        old_bundle = MAGIC + b"old generated JPEG reading copy"
         self.reader.files[target] = old_bundle
         for cache in (self.history / "math").glob("*.bmath"):
             cache.unlink()
-        old_key = digest(b"buddy-math-v1\0" + self.name.encode() + b"\0" + self.source)
+        old_key = digest(b"buddy-math-v2\0" + self.name.encode() + b"\0" + self.source)
         atomic_write(self.history / "math" / (old_key + ".bmath"), old_bundle)
         self.reader.writes.clear()
         self.assertEqual(self.sync(), 0)  # Original note does not need a transfer.
@@ -152,3 +255,8 @@ class MathSyncTests(unittest.TestCase):
             self.assertIn("math-0.jpg", book.namelist())
         self.assertEqual(self.reader.files[self.name], self.source)
         self.assertTrue(any("Upload equations" in message for message in self.messages))
+
+    def test_inline_only_note_is_rendered_and_synced(self):
+        (self.notes / self.name).write_bytes(b'Point $A$ is at $x=2$.')
+        self.sync()
+        self.assertIn(sidecar_name(self.name), self.reader.files)

@@ -8,7 +8,7 @@ This works with the current BuddyPoint firmware (1.6.7); no firmware update is n
 
 1. On the computer, create a dedicated folder in OneDrive, for example **BuddyPoint Notes**. Put your `.md` or `.markdown` notes inside it, including subfolders if desired. Mark the folder **Always keep on this device** and let OneDrive finish downloading it.
 2. Put the computer and X3 on the same trusted Wi-Fi network. Open **BuddySync** on the reader and start its connection. Keep that screen open during sync.
-3. Install Python 3.10 or newer if needed. Download [buddy_notes_sync.py](../companion/notes-sync/buddy_notes_sync.py), or use the copy in this repository.
+3. Install Python 3.9 or newer if needed. Download [buddy_notes_sync.py](../companion/notes-sync/buddy_notes_sync.py), or use the copy in this repository.
 4. Run a preview, replacing the example folder with your actual folder:
 
    ```sh
@@ -67,58 +67,88 @@ Physical-device verification is still needed: upload a small note, open it on th
 
 ## Optional equation rendering (Python)
 
-The `--math` option prepares an offline reading copy of notes containing standalone
-`$$ ... $$` equations. It requires BuddyPoint v1.6.9 or newer. Older firmware still reads the original Markdown but shows the math source.
+The `--math` option prepares an offline reading copy of notes containing inline
+`$...$` and display `$$...$$` maths. It requires BuddyPoint v1.6.9 or newer.
+Older firmware still reads the original Markdown but shows the math source.
 
-Install the optional packages into the same Python environment used for syncing:
+Install the optional packages into the same Python environment used for syncing.
+From the repository root:
 
 ```sh
-python -m pip install -r companion/notes-sync/requirements-math.txt
-python companion/notes-sync/buddy_notes_sync.py --folder "/path/to/OneDrive/Notes" --device haakanpoint.local --math
+python3 -m pip install -r companion/notes-sync/requirements-math.txt
+python3 companion/notes-sync/buddy_notes_sync.py --folder "/path/to/OneDrive/Notes" --device haakanpoint.local --math
 ```
+
+If you are already inside `companion/notes-sync`, use `requirements-math.txt`
+and `buddy_notes_sync.py` without the directory prefix. Keep `buddy_math.py` and
+`buddy_math_layout.py` beside the sync script. Python 3.9 is supported, including
+the macOS system Python; newer Python versions use newer compatible packages.
 
 Keep any existing `--reader-folder`, `--watch` and other options. For example:
 
 ```markdown
-# Quadratic formula
+Point $A$ is at $(2.75, 3.75)$.
+
+$$\begin{pmatrix}n\\r\end{pmatrix}\times r!=\frac{n!}{(n-r)!}$$
 
 $$
-x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+g(x)=\begin{cases}
+1-(x-1)^2 & \text{for x < 0} \\
+e^{x^2} & \text{for x = 0} \\
+0 & \text{for x > 0}
+\end{cases}
 $$
 
-Or a shorter equation on its own line:
-
-$$E = mc^2$$
+$$\frac{(x+1)\cancel{(x-4)}}{(x-2)\cancel{(x-4)}}$$
 ```
 
-This uses **Matplotlib MathText**, a Python renderer for a subset of LaTeX, rather
-than MathJax. No Node.js, browser, network rendering service, or system TeX
-installation is needed. Fractions, roots, Greek letters, sums, integrals,
-superscripts and subscripts are supported. Full LaTeX environments/macros such as
-`align` and matrices are not supported. Unsupported expressions are kept as text
-and reported during rendering. Inline `$...$` remains text in this first version.
-Dollar signs inside fenced or indented code are not rendered.
+This uses **Ziamath and latex2mathml** for layout and **resvg** for rasterization,
+all through Python. No Node.js, browser, network rendering service, or system TeX
+installation is needed. Supported notation includes matrices, cases, binomials,
+cancellation, fractions, roots, Greek letters, sums, integrals, limits,
+superscripts and subscripts. This does not execute LaTeX documents or load TeX
+packages/macros. Unsupported expressions are retained as text and reported.
+Inline delimiters must touch the expression (`$x^2$`) and stay on one line.
+Dollar signs inside fenced/indented code and inline code stay literal; ordinary
+prices such as `$5 and $10` are not treated as maths.
+
+Equations may span lines with the opening delimiter beside the expression.
+Adjacent expressions (`$$a=b$$$$b=c$$`) and prose beside a display equation work.
+Wide equality chains break at outer `=` signs; other oversized expressions shrink
+to fit. Inline formulas and surrounding prose are composed into wrapped line
+images because the reader itself places images on separate lines. These lines
+keep text and maths together, with page breaks between lines. They use a fixed
+font size and do not respond to reader font-size changes. Ordinary paragraphs
+continue to use the reader's font settings. Maths in Markdown tables remains
+LaTeX text because the reader does not render images within table cells.
 
 Original `.md`/`.markdown` files are never rewritten by the renderer. Each rendered
 note gets a `buddy-math-<filename-hash>.bmath` file beside it **on the reader only**;
-this contains a source fingerprint and an EPUB reading copy with embedded grayscale
-baseline JPEG equations (the JPEG decoder uses less reader memory than PNG). These files do not appear as books or notes in the library. The
-reader checks the source and the entire reading copy before using it. Editing a
-checklist or note invalidates the copy immediately: reopen the note to use native
-Markdown until the next sync with `--math`. Sync again and reopen to see updated
-math. Reading position/pagination is reset when the reading copy changes.
+this contains a source fingerprint and an EPUB copy with baseline grayscale JPEG
+images. JPEG avoids the PNG decoder's larger memory requirement. These files do
+not appear as books or notes in the library. The reader verifies the source and
+reading copy before use. Editing a checklist or note invalidates the copy:
+reopen the note to use native Markdown until the next sync with `--math`. Sync
+again and reopen to see updated maths. Reading position/pagination resets when
+the reading copy changes.
 
-Notes without equations keep the native Markdown rendering. Math-enabled notes use
-CommonMark plus tables; external images still show their descriptions, links show
-labels, and raw HTML is displayed as text. Equation images have a fixed size and
-will not grow with the reader's text-size setting. Expressions are limited to
-4,096 characters, 128 rendered equations per note, and 8 MiB per reading copy.
+Notes without maths keep native Markdown rendering. Math-enabled notes use
+CommonMark plus tables; ordinary image references still show their descriptions,
+links show labels, and raw HTML is displayed as text. Expressions are limited to
+4,096 characters, 512 equations per note, 2,048 unique image assets, and 8 MiB per
+reading copy (up to 7 MiB of image data). Invalid expressions remain text; a note
+that exceeds the total reading-copy limit still syncs as original Markdown.
+
 Generated copies are cached outside OneDrive in the sync history's `math` folder.
-Renderer updates automatically regenerate outdated copies, even when the note has not changed. Deleting that cache also forces regeneration. Old reader sidecars are not automatically
-deleted (the sync tool does not propagate deletions); they are ignored if their
-source changes or disappears and may be removed manually.
+Renderer upgrades automatically regenerate outdated copies, even when the note
+has not changed. **After upgrading, reinstall requirements, stop and restart the
+watch command, and sync again.** Deleting the local math cache also forces
+regeneration. Old reader sidecars are not automatically deleted (the sync tool
+does not propagate deletions); they are ignored if their source changes or
+disappears and may be removed manually.
 
-To check on hardware, sync a note with the example above, close BuddySync, and open
-it in the Markdown library tab. Confirm both equations display, ordinary headings
-and checklists still work, and a checklist edit falls back to Markdown until the
-next sync. A firmware build/host test cannot verify the physical screen rendering.
+To verify on hardware, copy [the advanced example](../companion/notes-sync/examples/advanced-math.md)
+into your notes folder, sync with `--math`, close BuddySync and open the note.
+Check the matrix, cases, crossed-out factors, wrapped inline text and long equality
+chain. Also confirm checklists still work. Host tests cannot verify the physical
+e-ink screen.

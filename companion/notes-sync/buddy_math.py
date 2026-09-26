@@ -8,12 +8,10 @@ import struct
 import zipfile
 
 # Bump when generated output changes so unchanged notes refresh on the next sync.
-RENDERER_VERSION = 2
+RENDERER_VERSION = 3
 MAGIC = b"BUDMATH1"
 HEADER = struct.Struct("<8sIQIQ")
 MAX_BUNDLE = 8 * 1024 * 1024
-MAX_EQUATIONS = 128
-MAX_EXPRESSION = 4096
 
 
 def fnv(data):
@@ -31,104 +29,125 @@ def sidecar_name(name):
 def dependencies():
     try:
         from markdown_it import MarkdownIt
-        from matplotlib.mathtext import MathTextParser
-        from matplotlib.font_manager import FontProperties
-        from PIL import Image, ImageOps
-        import numpy
+        import ziamath
+        from resvg_py import svg_to_bytes
+        from latex2mathml.converter import convert
+        from PIL import Image
     except ImportError as error:
         command = shlex.join([sys.executable, "-m", "pip", "install", "-r",
                               str(Path(__file__).resolve().with_name("requirements-math.txt"))])
         raise ValueError(f"Math rendering needs the optional packages. Run: {command}") from error
-    return MarkdownIt, MathTextParser, FontProperties, Image, ImageOps, numpy
+    return MarkdownIt, ziamath, svg_to_bytes, convert, Image
+
+
+def closing_math(source, delimiter, start, inline=False):
+    end = source.find(delimiter, start)
+    while end >= 0:
+        slashes = 0
+        pos = end - 1
+        while pos >= 0 and source[pos] == "\\":
+            slashes += 1
+            pos -= 1
+        if slashes % 2 == 0:
+            if not inline or (end > start and not source[end-1].isspace()
+                              and (end + 1 == len(source) or not source[end+1].isdigit())):
+                if not inline or "\n" not in source[start:end]:
+                    return end
+        end = source.find(delimiter, end + len(delimiter))
+    return -1
+
+
+def math_inline(state, silent):
+    start = state.pos
+    if state.src[start] != '$':
+        return False
+    delimiter = '$$' if state.src.startswith('$$', start) else '$'
+    begin = start + len(delimiter)
+    if begin >= state.posMax or (delimiter == '$' and state.src[begin].isspace()):
+        return False
+    end = closing_math(state.src[:state.posMax], delimiter, begin, delimiter == '$')
+    if end < 0 or end == begin:
+        return False
+    if not silent:
+        token = state.push('buddy_math_display' if delimiter == '$$' else 'buddy_math_inline', '', 0)
+        token.content, token.markup = state.src[begin:end].strip(), delimiter
+    state.pos = end + len(delimiter)
+    return True
 
 
 def math_block(state, start, end, silent):
-    """Only standalone $$ blocks; markdown-it shields fenced/indented code."""
+    # Capture display blocks before Markdown interprets their interior as lists,
+    # emphasis, or horizontal rules. The inline rule splits adjacent expressions
+    # and preserves any prose following the closing delimiter.
     if state.sCount[start] - state.blkIndent >= 4:
         return False
-    line = state.src[state.bMarks[start] + state.tShift[start]:state.eMarks[start]].strip()
-    if not line.startswith("$$"):
+    begin = state.bMarks[start] + state.tShift[start]
+    if not state.src.startswith('$$', begin):
         return False
-    if len(line) > 4 and line.endswith("$$"):
-        expression, stop = line[2:-2], start + 1
-    elif line == "$$":
-        stop = start + 1
-        while stop < end:
-            if state.sCount[stop] < state.blkIndent:
-                return False
-            closing = state.src[state.bMarks[stop] + state.tShift[stop]:state.eMarks[stop]].strip()
-            if closing == "$$":
-                break
+    close = closing_math(state.src[:state.eMarks[end-1]], '$$', begin + 2)
+    if close < 0:
+        return False
+    stop = start + 1
+    while True:
+        while stop < end and state.eMarks[stop-1] < close + 2:
             stop += 1
-        if stop == end:
-            return False
-        expression = state.getLines(start + 1, stop, state.blkIndent, False)
-        stop += 1
-    else:
-        return False
+        # A second adjacent display may start here and close on another line.
+        tail = state.src[close + 2:state.eMarks[stop-1]]
+        if not tail.lstrip().startswith('$$'):
+            break
+        following = close + 2 + len(tail) - len(tail.lstrip())
+        next_close = closing_math(state.src[:state.eMarks[end-1]], '$$', following + 2)
+        if next_close < 0:
+            break
+        close = next_close
     if silent:
         return True
-    token = state.push("buddy_math", "", 0)
-    token.block, token.content, token.map = True, expression.strip(), [start, stop]
+    opening = state.push('paragraph_open', 'p', 1)
+    opening.map = [start, stop]
+    token = state.push('inline', '', 0)
+    token.content = state.getLines(start, stop, state.blkIndent, False).strip()
+    token.map, token.children = [start, stop], []
+    state.push('paragraph_close', 'p', -1)
     state.line = stop
     return True
 
 
 def render_note(source, title, report=lambda message: None):
     """Return a checked EPUB sidecar or None. The source bytes are never rewritten."""
-    MarkdownIt, MathTextParser, FontProperties, Image, ImageOps, numpy = dependencies()
+    from buddy_math_layout import MathLayout
+    MarkdownIt, ziamath, rasterize, convert, Image = dependencies()
     try:
         text = source.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         raise ValueError("Math notes must use UTF-8 text") from error
     md = MarkdownIt("commonmark", {"html": False, "xhtmlOut": True}).enable("table")
-    md.block.ruler.before("fence", "buddy_math", math_block, {"alt": ["paragraph", "reference", "blockquote", "list"]})
+    md.block.ruler.before("fence", "buddy_math", math_block,
+                          {"alt": ["paragraph", "reference", "blockquote", "list"]})
+    md.inline.ruler.before("escape", "buddy_math", math_inline)
     tokens = md.parse(text)
-    if not any(token.type == "buddy_math" for token in tokens):
+    if not any(child.type.startswith('buddy_math_') for token in tokens for child in (token.children or [])):
         return None
-    images, headings = [], []
-    parser = MathTextParser("agg")
-    measure = MathTextParser("path")
-    prop = FontProperties(size=20)
-
-    def render_math(tokens, index, options, env):
-        expression = tokens[index].content
-        try:
-            if len(expression) > MAX_EXPRESSION or len(images) >= MAX_EQUATIONS:
-                raise ValueError("equation length/count limit exceeded")
-            # No usetex/subprocess/network: MathText parses a bounded TeX subset.
-            math = "$" + " ".join(expression.splitlines()) + "$"
-            size = measure.parse(math, dpi=100, prop=prop)
-            if size.width > 4096 or size.height > 4096:
-                raise ValueError("equation is too large")
-            result = parser.parse(math, dpi=100, prop=prop)
-            image = Image.fromarray(numpy.asarray(result.image)).convert("L")
-            image = ImageOps.invert(image)
-            image.thumbnail((420, 500))
-            image = ImageOps.expand(image, border=6, fill=255)
-            image = image.point(lambda pixel: 255 if pixel >= 160 else 0)
-            encoded = BytesIO()
-            # Baseline grayscale JPEG uses the reader's smaller (~20 KB) decoder.
-            # PNG needs ~44 KB plus headroom even for tiny monochrome equations.
-            image.save(encoded, format="JPEG", quality=100, progressive=False, optimize=False)
-            name = f"math-{len(images)}.jpg"
-            images.append((name, encoded.getvalue()))
-            return f'<p><img src="{name}" alt="{escape(expression, quote=True)}" /></p>\n'
-        except (ValueError, RuntimeError, OverflowError, RecursionError) as error:
-            report(f"Equation kept as text: {str(error).strip()}")
-            return "<pre>" + escape("$$\n" + expression + "\n$$") + "</pre>\n"
-
-    md.renderer.rules["buddy_math"] = render_math
-    # Match the offline reader: don't load remote/local pictures or activate links.
+    layout = MathLayout(ziamath, rasterize, convert, Image, report)
+    headings = []
     md.renderer.rules["image"] = lambda ts, i, opts, env: "[" + escape(ts[i].content) + "]"
     md.renderer.rules["link_open"] = lambda *args: ""
     md.renderer.rules["link_close"] = lambda *args: ""
+    md.renderer.rules["buddy_rendered"] = lambda ts, i, opts, env: ts[i].content
+    table_depth = 0
     for index, token in enumerate(tokens):
         if token.type == "heading_open":
             anchor = f"heading-{len(headings)}"
             token.attrSet("id", anchor)
             headings.append((anchor, tokens[index + 1].content))
+        elif token.type == 'table_open':
+            table_depth += 1
+        elif token.type == 'table_close':
+            table_depth -= 1
+        elif token.type == 'inline' and any(t.type.startswith('buddy_math_') for t in (token.children or [])):
+            token.content = layout.render(token.children, table=bool(table_depth))
+            token.type, token.children = 'buddy_rendered', None
     body = md.renderer.render(tokens, md.options, {})
+    images = layout.images
     title = escape(title)
     xhtml = ('<?xml version="1.0" encoding="UTF-8"?>'
              '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>' + title +

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync a computer's Markdown folder with BuddyPoint. Python 3.10+; optional --math needs requirements-math.txt."""
+"""Sync a computer's Markdown folder with BuddyPoint. Python 3.9+; optional --math needs requirements-math.txt."""
 from __future__ import annotations
 
 import argparse
@@ -412,7 +412,7 @@ class Sync:
         for name in sorted(names):
             self.report(f"Checking equations: {name}")
             source = self.local(name)
-            if source is None or b"$$" not in source:
+            if source is None or b"$" not in source:
                 continue
             if self.dry_run:
                 self.report(f"Preview equation rendering: {name}")
@@ -514,7 +514,7 @@ def main(argv=None):
     parser.add_argument("--device", default="haakanpoint.local", help="Reader hostname or IP shown in BuddySync")
     parser.add_argument("--reader-folder", default="/OneDriveNotes", help="Dedicated SD-card folder")
     parser.add_argument("--dry-run", action="store_true", help="Preview transfers without writing notes or history")
-    parser.add_argument("--math", action="store_true", help="Render standalone $$ equations using optional Python packages")
+    parser.add_argument("--math", action="store_true", help="Render inline and display LaTeX maths using optional Python packages")
     parser.add_argument("--watch", action="store_true", help="Repeat until Ctrl+C; retry while reader is unavailable")
     parser.add_argument("--interval", type=int, default=60, help="Seconds between repeats (minimum 10)")
     args = parser.parse_args(argv)

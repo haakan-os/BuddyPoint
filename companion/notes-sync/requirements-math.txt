@@ -1,4 +1,8 @@
-# Optional: only needed for --math. No JavaScript or system TeX installation.
-matplotlib>=3.8,<4
+# Optional: only needed for --math. No Node.js or system TeX installation.
+ziamath>=0.13,<0.14
+latex2mathml>=3.78,<4
+# The legacy wheel supports the macOS system Python without a Rust compiler.
+resvg-py==0.1.6; python_version < "3.10"
+resvg-py>=0.5,<0.6; python_version >= "3.10"
 markdown-it-py>=3,<5
 Pillow>=10,<13
