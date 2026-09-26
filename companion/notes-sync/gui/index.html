@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BuddyPoint Sync</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><main>
+<header><div><p class="eyebrow">BUDDYPOINT / DESKTOP COMPANION</p><h1>Your notes, ready to go.</h1><p class="muted">Sync a folder on this computer with your reader.</p></div><nav><a href="/guide" target="_blank" rel="noopener">Feature guide ↗</a><button id="quit" class="quiet">Quit</button></nav></header>
+<div class="notice"><span class="dot"></span><div><strong>Open BuddySync on your reader</strong><br><span>Connect both devices to the same Wi-Fi. Close BuddySync after syncing to read your notes.</span></div></div>
+<div class="layout"><section class="card"><h2>Sync settings</h2><fieldset id="settings">
+<label for="folder">Notes folder</label><div class="folder-row"><input id="folder" placeholder="Choose your Obsidian vault or notes folder"><button id="browse" class="secondary">Browse…</button></div><p class="hint">Subfolders are included. OneDrive handles the cloud part.</p>
+<div class="pair"><div><label for="device">Reader address</label><input id="device" value="haakanpoint.local" spellcheck="false"></div><div><label for="reader_folder">Folder on reader</label><input id="reader_folder" value="Obsidian" spellcheck="false"></div></div>
+<p class="hint">Keep the same address and destination as your existing command-line setup.</p>
+<div class="divider"></div><label class="check"><input id="math" type="checkbox"><span><strong>Render maths & images</strong><small>Prepare equations and diagrams for offline reading.</small></span></label>
+<div class="pair"><div><label for="math_size">Maths size</label><select id="math_size"><option value="22">Small · 22</option><option value="26" selected>Standard · 26</option><option value="32">Large · 32</option><option value="38">Extra large · 38</option></select></div><div><label for="interval">Auto-sync interval</label><div class="units"><input id="interval" type="number" min="10" max="86400" value="30"><span>seconds</span></div></div></div>
+</fieldset>
+<div class="actions"><button id="once" class="primary">Sync now</button><button id="watch" class="secondary">Start auto-sync</button><button id="stop" class="secondary" disabled>Stop</button></div><button id="preview" class="text-button">Preview changes first</button><p class="hint">Settings are remembered when you start. Stop finishes the current operation safely.</p>
+</section>
+<section class="card progress"><div class="status-head"><h2>Activity</h2><span id="badge" class="badge">Ready</span></div><p id="status" role="status" aria-live="polite">Loading your settings…</p><div id="error" class="error" role="alert" hidden></div><div id="summary" class="summary"><p class="muted">Your last sync summary will appear here.</p></div><details open><summary>Activity log</summary><pre id="log" tabindex="0" aria-label="Sync activity log">Ready when you are.</pre></details></section></div>
+<footer>Runs locally on your computer. Notes travel directly to your reader.<br>Closing this tab keeps auto-sync running. Use <strong>Quit</strong> to stop and close the app.</footer>
+</main></body></html>

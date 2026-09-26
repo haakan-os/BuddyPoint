@@ -4,6 +4,27 @@ Sync a local Markdown folder (including subfolders) with BuddyPoint over Wi-Fi.
 The folder can be inside OneDrive; the OneDrive desktop app handles cloud syncing.
 Open **BuddySync** on the reader before running the script.
 
+
+## Start with the desktop app
+
+**Mac:** double-click `Start BuddyPoint Sync.command`. **Windows:** double-click
+`Start BuddyPoint Sync.bat`. Or run `python3 buddy_notes_gui.py` from this folder.
+It opens a local browser window with a folder picker, saved settings, Sync now,
+automatic sync, safe Stop, a summary and an activity log. No extra UI packages
+are needed. Keep the `gui` folder and all Python files together.
+
+Open BuddySync on the reader, choose your notes folder, and use the same reader
+address and destination as your existing command-line setup. Settings are saved
+when you start; sync never starts automatically when you open the app. Stop your
+old command-line watch process before using the UI. Closing the browser tab alone
+does not stop sync; use **Quit**.
+
+**[Read the complete user guide](USER_GUIDE.md)** for setup, images, maths size,
+links, flashcards, favourites, checklists, OneDrive, updates and troubleshooting.
+The same guide is available through **Feature guide** in the app.
+
+## Command line
+
 ```sh
 python buddy_notes_sync.py --folder "/path/to/OneDrive/Notes" --device haakanpoint.local
 ```

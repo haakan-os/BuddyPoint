@@ -1,0 +1,200 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BuddyPoint feature guide</title><link rel="stylesheet" href="/style.css"></head><body><main class="guide"><h1>BuddyPoint: notes, sync and study guide</h1>
+<p>This guide covers the desktop sync app and the new reading features in <strong>BuddyPoint v1.7.0</strong>. Your original Markdown notes stay editable in Obsidian, OneDrive, or any text editor.</p>
+<h2>1. Update and open the sync app</h2>
+<ol>
+<li>On the reader, use the firmware update option in <strong>Settings</strong> to install <strong>v1.7.0 or newer</strong>.</li>
+<li>On your computer, download the complete notes-sync companion or update this repository. Keep all files in the <code>notes-sync</code> folder together, including <code>gui</code> and the Python modules.</li>
+<li>Install <strong>Python 3.9 or newer</strong> if it is not already available.</li>
+<li><strong>Mac:</strong> double-click <strong>Start BuddyPoint Sync.command</strong>. <strong>Windows:</strong> double-click <strong>Start BuddyPoint Sync.bat</strong>. <strong>Linux:</strong> run <code>python3 buddy_notes_gui.py</code> from the notes-sync folder. The same Python command also works on Mac.</li>
+<li>A browser window opens with <strong>BuddyPoint Sync</strong>. It runs on this computer; there is no account to create.</li>
+</ol>
+<p>The Mac launcher may open a Terminal window as well. Leave it open while syncing. If macOS blocks a downloaded launcher, open Terminal in the notes-sync folder and run <code>python3 buddy_notes_gui.py</code>. Do not disable macOS security settings.</p>
+<p>The browser interface itself needs no extra Python packages. For equations and images, run this once <strong>from the notes-sync folder</strong>, using the same Python that starts the app:</p>
+<pre><code class="language-sh">python3 -m pip install -r requirements-math.txt
+</code></pre>
+<p>On Windows, use <code>py -3 -m pip install -r requirements-math.txt</code>.</p>
+<p>This desktop UI does not require another firmware update beyond v1.7.0.</p>
+<h2>2. Choose your folders and connect</h2>
+<ol>
+<li>Put the reader and computer on the same Wi-Fi network.</li>
+<li>Open <strong>BuddySync</strong> on the reader and start its connection. Keep it open during transfers.</li>
+<li>In the desktop app, click <strong>Browse</strong> and select your notes folder or Obsidian vault. You can also paste its full folder path.</li>
+<li>Set <strong>Reader address</strong> to the hostname or IP shown in BuddySync. The usual hostname is <code>haakanpoint.local</code>.</li>
+<li>Set <strong>Folder on reader</strong> to a name such as <code>Obsidian</code>. This creates a dedicated top-level folder on the SD card.</li>
+<li>Enable <strong>Render maths &amp; images</strong> if you have installed the optional packages.</li>
+<li>Click <strong>Preview changes first</strong>, or go straight to <strong>Sync now</strong>.</li>
+<li>Wait for <strong>Sync complete</strong>, close BuddySync on the reader, and open <strong>Library → Markdown</strong> to find your notes.</li>
+</ol>
+<p><strong>Already using the command line?</strong> Keep exactly the same notes folder, reader address and destination folder. The UI shares its history and backups with the command-line tool. For example, if you used <code>--device haakanpoint.local --reader-folder Obsidian</code>, use those values in the UI. Switching from hostname to IP changes the saved sync identity. If the app reports an identity mismatch, restore the original values; do not delete your history to bypass it.</p>
+<p>The reader's Markdown tab refreshes the library index when first opened. Very deeply nested notes may need to be opened through the file browser: the library indexes only a limited folder depth.</p>
+<h2>3. Everyday syncing</h2>
+<table>
+<thead>
+<tr>
+<th>Control</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Sync now</strong></td>
+<td>Runs one sync, then stops.</td>
+</tr>
+<tr>
+<td><strong>Start auto-sync</strong></td>
+<td>Repeats while the app runs. The interval is at least 10 seconds. It retries when the reader is unavailable.</td>
+</tr>
+<tr>
+<td><strong>Stop</strong></td>
+<td>Stops automatic checks and finishes the current operation safely before stopping. A network request can take up to 60 seconds to finish.</td>
+</tr>
+<tr>
+<td><strong>Preview changes first</strong></td>
+<td>Shows planned note transfers without writing notes or generating reading copies. It is not a full equation/image preview.</td>
+</tr>
+<tr>
+<td><strong>Quit</strong></td>
+<td>Requests a safe stop and closes the local app after the current operation. You can then close the browser tab and launcher window.</td>
+</tr>
+</tbody>
+</table>
+<p>Settings are saved when you start a sync or preview. Reopening the app restores the settings but <strong>does not automatically start syncing</strong>.</p>
+<p>Closing the browser tab alone <strong>does not stop auto-sync</strong>. Use Stop or Quit. The computer must stay awake and BuddySync must be open on the reader for transfers to work. Stop an existing command-line watch process before starting the UI; both use the same lock so they cannot sync the same folder simultaneously.</p>
+<h3>What the summary means</h3>
+<ul>
+<li><strong>Uploaded:</strong> notes sent from computer to reader.</li>
+<li><strong>Downloaded:</strong> notes brought back from reader to computer, including checklist edits.</li>
+<li><strong>Unchanged:</strong> original note text already matched. Its images may still have changed.</li>
+<li><strong>Conflicts:</strong> both copies changed; the reader copy was preserved separately.</li>
+<li><strong>Reading copies:</strong> updated equation/image versions uploaded to the reader.</li>
+<li><strong>Links &amp; cards:</strong> updated navigation and flashcard helper files.</li>
+<li><strong>Skipped:</strong> rendering operations or helper generation that could not complete. Read the activity log for the reason.</li>
+</ul>
+<p>A preview's counts are planned actions, not completed transfers. During auto-sync, the summary shows the last completed pass; the status shows whether it is waiting, syncing or stopping. The activity panel keeps the latest 500 messages.</p>
+<h2>4. What is synced and how edits are protected</h2>
+<p>The tool syncs <code>.md</code> and <code>.markdown</code> files in both directions, including subfolders. Hidden files, hidden folders, symbolic links, empty folders, EPUBs and other documents are not copied. Required destination folders are created automatically.</p>
+<p>OneDrive syncing works by choosing a folder that the OneDrive desktop app already manages. BuddyPoint does not log into Microsoft itself. Make cloud files available locally before syncing.</p>
+<p>Images referenced by notes can be embedded in their reader viewing copies when <strong>Render maths &amp; images</strong> is enabled. They are not copied back from the reader as editable image files.</p>
+<p>If both copies of a note changed, the computer version stays at the original name. The reader version is preserved on both devices as a file with <code>.reader-conflict-…</code> in its name. Compare and merge these copies yourself.</p>
+<p>Deletions are <strong>not propagated</strong>: a note missing from one side is copied back from the other. To remove a note permanently, stop sync and remove it from both locations. A rename behaves like a new path, so an old copy may reappear.</p>
+<p>Backups and sync history live in <code>~/.buddypoint-sync</code> on your computer. Interrupted transfers are recovered on the next run. Do not delete this folder to fix a connection problem.</p>
+<h2>5. Read Markdown and use checklists</h2>
+<p>Open a note from <strong>Library → Markdown</strong>, the file browser, or <strong>Apps → Markdown viewer</strong>. Headings, lists, emphasis, code and basic tables are supported. The reader remembers your reading position; a changed note may need to be repaginated.</p>
+<p>Create tasks like this:</p>
+<pre><code class="language-markdown"># Before class
+- [ ] Read chapter 3
+- [x] Download the lecture notes
+- [ ] Revise the practice questions
+</code></pre>
+<p>On the reader, open the note's menu → <strong>Checklist</strong>. Choose a task and press Confirm to toggle it. Back reopens the note. Sync again to bring the changes to your computer. The checklist supports up to 128 tasks per note; tasks inside code blocks are ignored.</p>
+<h2>6. Equations and maths size</h2>
+<p>Enable <strong>Render maths &amp; images</strong> before syncing.</p>
+<p>Use single dollar signs for inline maths:</p>
+<pre><code class="language-markdown">The point is $A=(2.75,3.75)$.
+</code></pre>
+<p>Use double dollar signs for a display equation:</p>
+<pre><code class="language-markdown">$$x=\frac{-b\pm\sqrt{b^2-4ac}}{2a}$$
+</code></pre>
+<p>Matrices, cases, binomial coefficients, cancellation, fractions, roots, limits, sums and integrals are supported. Long equality chains can wrap at <code>=</code>. Try the supplied <code>examples/math.md</code> and <code>examples/advanced-math.md</code>.</p>
+<p>Choose <strong>Maths size</strong> in the desktop app to make equations and paragraphs containing inline maths larger or smaller. Standard is 26; Large is 32. The command line accepts any size from 18 to 40. Sync again after changing the size; unchanged notes are regenerated automatically. Very wide equations may still shrink to fit.</p>
+<p>Ordinary text uses the reader's own font settings. Paragraphs containing inline maths are rendered as images and use the companion's maths size. Maths inside tables stays as LaTeX text. Unsupported expressions remain readable as source text and produce a message in the log; this is not a complete LaTeX document engine.</p>
+<p>On the reader, set <strong>Settings → Reader → Images → Display</strong>. Close BuddySync and reopen the note after syncing.</p>
+<h2>7. Diagrams and images</h2>
+<p>Standard Markdown:</p>
+<pre><code class="language-markdown">![Number line](numberline.png)
+![Lecture diagram](../Attachments/diagram.png)
+</code></pre>
+<p>Obsidian attachment syntax:</p>
+<pre><code class="language-markdown">![[diagram.png]]
+</code></pre>
+<p>The companion first looks beside the note, then relative to the vault root. A bare filename can be found in an attachment subfolder if it is unique. If two files have the same name, use a folder path.</p>
+<p>PNG, JPEG, GIF (first frame), WebP and BMP are supported. They are converted to grayscale JPEGs up to 420 × 500 pixels; transparent backgrounds become white. SVG, internet images and images outside the chosen notes folder are not loaded. Images inside tables show descriptions.</p>
+<p>Editing an image triggers an updated reading copy even when the Markdown text hasn't changed. Keep <strong>Render maths &amp; images</strong> enabled, sync, then reopen the note.</p>
+<h2>8. Links between notes</h2>
+<p>Create a standard Markdown link:</p>
+<pre><code class="language-markdown">[My revision notes](Revision.md)
+[Next topic](../Week2/Calculus.md)
+</code></pre>
+<p>Or an Obsidian wikilink:</p>
+<pre><code class="language-markdown">[[Revision]]
+[[Week2/Calculus|Next topic]]
+</code></pre>
+<p>Run a sync. On the reader, open the note menu → <strong>Note links</strong>, select a destination, and press Confirm. Links are chosen from this menu rather than directly from the text on the page.</p>
+<p>Only existing Markdown notes within the synced folder are offered. Duplicate bare filenames need a folder path. External websites are not opened. Heading fragments currently open the destination note at its saved position; they do not jump directly to that heading.</p>
+<p>Links need normal sync, but do not require the maths packages.</p>
+<h2>9. Flashcards</h2>
+<p>Put each question and answer on one line with <strong>spaces around <code>::</code></strong>:</p>
+<pre><code class="language-markdown">What is the derivative of x²? :: 2x
+How many arrangements of 3 colours from 8? :: 8 × 7 × 6 = 336
+</code></pre>
+<ol>
+<li>Sync the note.</li>
+<li>Open its reader menu → <strong>Flashcards</strong>.</li>
+<li>Select a question. The question is shown first.</li>
+<li>Press <strong>Reveal</strong> to see the answer; <strong>Question</strong> flips it back.</li>
+<li>Page buttons scroll longer text. Back returns to the question list; Back again returns to the note.</li>
+</ol>
+<p>This first version uses plain text. It does not render equations or images inside cards, track scores, or schedule spaced repetition. Cards inside fenced or indented code blocks are ignored.</p>
+<p>Questions/link labels are limited to 180 UTF-8 bytes; answers to 2,048 bytes. A note supports up to 64 links and cards combined. Oversized entries are reported in the log. Cards need normal sync, without optional maths packages.</p>
+<h2>10. Favourites</h2>
+<p>While reading an EPUB or Markdown note, open the reader menu → <strong>Toggle favourite</strong>. A message confirms whether it was added or removed.</p>
+<p>Find saved items in <strong>Library → Favourites</strong>. These are shortcuts to whole books or notes, separate from page bookmarks. Favourites stay on this reader and are not synced to the computer. If you rename or move a file, add it again at its new location.</p>
+<h2>11. Other BuddyPoint features</h2>
+<ul>
+<li><strong>Sudoku:</strong> open it from Apps. Games are saved so you can return later.</li>
+<li><strong>KOReader reading notes:</strong> the separate BuddySync KOReader plugin can send highlights and notes to <code>/BuddyNotes</code>. Open them through <strong>Apps → Reading notes</strong>. These exports are snapshots from KOReader; sending again replaces previous exports. Keep your own two-way notes in a separate folder such as <code>/Obsidian</code>.</li>
+<li><strong>OTA updates:</strong> use the firmware update option in Settings. BuddyPoint checks stable releases in the BuddyPoint GitHub repository. Updating the desktop companion alone does not update the reader, and installing firmware does not update the computer's scripts.</li>
+</ul>
+<h2>12. Troubleshooting</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>What to try</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Cannot connect / waiting for reader</td>
+<td>Open BuddySync, start its connection, and check both devices are on the same Wi-Fi. Keep your existing saved reader address.</td>
+</tr>
+<tr>
+<td>Sync history belongs to another folder/device</td>
+<td>Restore the original folder, reader address and destination from your previous command. Do not erase history.</td>
+</tr>
+<tr>
+<td>Another sync is running</td>
+<td>Stop your old command-line watch process or another UI instance.</td>
+</tr>
+<tr>
+<td>Missing optional packages</td>
+<td>Run the installation command in section 1 with the same Python used to launch the app, then retry.</td>
+</tr>
+<tr>
+<td>Empty equation/image boxes</td>
+<td>Check Images is set to Display, update all companion files, sync with maths enabled, close BuddySync and reopen the note. Read the log for missing images or unsupported expressions.</td>
+</tr>
+<tr>
+<td>Empty Links or Flashcards menu</td>
+<td>Install v1.7.0+, check syntax, sync that note again, then reopen it.</td>
+</tr>
+<tr>
+<td>An image is missing</td>
+<td>Use a local supported image within the selected notes folder. If names are duplicated, specify the relative path. Make OneDrive files available offline.</td>
+</tr>
+<tr>
+<td>Browse does nothing</td>
+<td>The folder picker may be behind the browser. You can paste a full path instead. Linux needs Zenity or KDialog for Browse.</td>
+</tr>
+<tr>
+<td>Browser says local app unavailable</td>
+<td>Reopen the launcher and use its new browser window/link. Old tabs stop working after the app exits.</td>
+</tr>
+<tr>
+<td>Stop is taking a while</td>
+<td>Let the current transfer or network timeout finish. Stop preserves transaction recovery.</td>
+</tr>
+</tbody>
+</table>
+<p>For a first test, copy the entire supplied <code>examples</code> folder into your notes folder. It contains study cards, linked notes, an image and equation examples. Sync it, then try the menus on the reader.</p>
+</main></body></html>

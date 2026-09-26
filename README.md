@@ -60,6 +60,10 @@ npm test
 
 To refresh just the firmware package after a direct PlatformIO build, run `python3 scripts/package_web_firmware.py` from the project root. For command-line flashing on macOS, `./scripts/flash.sh` uses PlatformIO.
 
+## Notes sync desktop app
+
+Launch `companion/notes-sync/Start BuddyPoint Sync.command` on Mac or the matching `.bat` on Windows. Choose your folder and sync from the local browser interface. See the [complete feature guide](companion/notes-sync/USER_GUIDE.md).
+
 ## KOReader companion
 
 Copy `koreader-plugin/buddysync.koplugin/` into your KOReader `plugins/` directory and restart KOReader. The plugin appears as **BuddySync**. See the [pairing guide](docs/PAIRING_GUIDE.md).
