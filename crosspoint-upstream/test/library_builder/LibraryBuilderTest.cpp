@@ -10,6 +10,7 @@
 #include "Epub.h"
 #include "LibraryBuilder.h"
 #include "LibraryIndexFile.h"
+#include "LibraryShelf.h"
 
 using namespace library;
 
@@ -399,4 +400,115 @@ TEST_F(LibraryBuilderTest, SortAllocationFailureProducesValidDegradedIndex) {
   LibraryIndexFile index;
   ASSERT_TRUE(index.open(INDEX));
   EXPECT_EQ(index.bookCount(), 513);
+}
+
+// Exercise the same file-type/search maps used by the Library tabs against a
+// real serialized index, including arbitrary sync-folder names and mixed case.
+TEST_F(LibraryBuilderTest, ShelvesSeparateMarkdownInEverySortOrder) {
+  fake::add("/OneDriveNotes/tasks.md");
+  fake::add("/MyNotes/journal.MARKDOWN");
+  fake::add("/nested/folder/ideas.MD");
+  fake::add("/normal.txt");
+  fake::add("/comic.xtc");
+  fake::add("/image.png");
+  initial();
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  const SortOrder orders[] = {SortOrder::RecentAsc, SortOrder::RecentDesc, SortOrder::TitleAsc,
+                              SortOrder::TitleDesc, SortOrder::AuthorAsc,  SortOrder::AuthorDesc};
+  for (const auto order : orders) {
+    uint16_t rows[16] = {};
+    uint16_t count = 0;
+    ASSERT_TRUE(filterShelf(index, order, true, "", rows, 16, count));
+    ASSERT_EQ(count, 3);
+    std::vector<std::string> notes;
+    for (uint16_t i = 0; i < count; ++i) notes.push_back(pathAt(index, order, rows[i]));
+    std::sort(notes.begin(), notes.end());
+    EXPECT_EQ(notes, (std::vector<std::string>{"/MyNotes/journal.MARKDOWN", "/OneDriveNotes/tasks.md",
+                                               "/nested/folder/ideas.MD"}));
+    ASSERT_TRUE(filterShelf(index, order, false, "", rows, 16, count));
+    ASSERT_EQ(count, 4);
+    std::vector<std::string> books;
+    for (uint16_t i = 0; i < count; ++i) books.push_back(pathAt(index, order, rows[i]));
+    std::sort(books.begin(), books.end());
+    EXPECT_EQ(books, (std::vector<std::string>{"/a.epub", "/b.epub", "/comic.xtc", "/normal.txt"}));
+  }
+}
+
+TEST_F(LibraryBuilderTest, SearchStaysInsideTheChosenShelf) {
+  fake::add("/MyNotes/shared.md");
+  fake::add("/shared.epub");
+  bookMetadata["/shared.epub"] = {"Shared", "Example Writer", true};
+  initial();
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  uint16_t rows[16] = {};
+  uint16_t count = 0;
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, true, "shared", rows, 16, count));
+  ASSERT_EQ(count, 1);
+  EXPECT_EQ(pathAt(index, SortOrder::TitleAsc, rows[0]), "/MyNotes/shared.md");
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, false, "shared", rows, 16, count));
+  ASSERT_EQ(count, 1);
+  EXPECT_EQ(pathAt(index, SortOrder::TitleAsc, rows[0]), "/shared.epub");
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, false, "writer", rows, 16, count));
+  ASSERT_EQ(count, 1);
+  EXPECT_EQ(pathAt(index, SortOrder::TitleAsc, rows[0]), "/shared.epub");
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, true, "writer", rows, 16, count));
+  EXPECT_EQ(count, 0);
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, true, "missing", rows, 16, count));
+  EXPECT_EQ(count, 0);
+}
+
+TEST_F(LibraryBuilderTest, EmptyMarkdownShelfDoesNotFallBackToBooks) {
+  initial();
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  uint16_t rows[2] = {};
+  uint16_t count = 99;
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, true, "", rows, 2, count));
+  EXPECT_EQ(count, 0);
+}
+
+TEST_F(LibraryBuilderTest, ShelfRejectsShortBufferAndReadFailureWithoutPartialRows) {
+  initial();
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  uint16_t rows[2] = {};
+  uint16_t count = 99;
+  EXPECT_FALSE(filterShelf(index, SortOrder::TitleAsc, false, "", rows, 1, count));
+  EXPECT_EQ(count, 0);
+  fake::failRead = 2;
+  EXPECT_FALSE(filterShelf(index, SortOrder::TitleAsc, false, "", rows, 2, count));
+  EXPECT_EQ(count, 0);
+}
+
+TEST_F(LibraryBuilderTest, RebuildPicksUpNewlySyncedMarkdown) {
+  initial();
+  fake::add("/CustomNotes/new.md");
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true));
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  uint16_t rows[3] = {};
+  uint16_t count = 0;
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, true, "", rows, 3, count));
+  ASSERT_EQ(count, 1);
+  EXPECT_EQ(pathAt(index, SortOrder::TitleAsc, rows[0]), "/CustomNotes/new.md");
+}
+
+TEST(LibraryShelf, PinnedDuplicatesUseFilteredPositionsAndNeverOpenNotes) {
+  // Mixed index rows: note, book A, note, book B, book C, note, book D.
+  const uint16_t rows[] = {1, 3, 4, 6};
+  EXPECT_EQ(shelfPositionFor(0, rows, 4), -1);
+  EXPECT_EQ(shelfPositionFor(2, rows, 4), -1);
+  EXPECT_EQ(shelfPositionFor(1, rows, 4), 0);
+  EXPECT_EQ(shelfPositionFor(4, rows, 4), 2);
+  const uint16_t overlaps[] = {0, 2};  // A and C pinned, plus an unindexed book.
+  EXPECT_EQ(shelfRowFor(0, 3, overlaps, 2, rows, 4), -1);
+  EXPECT_EQ(shelfRowFor(2, 3, overlaps, 2, rows, 4), -1);
+  EXPECT_EQ(shelfRowFor(3, 3, overlaps, 2, rows, 4), 3);  // B
+  EXPECT_EQ(shelfRowFor(4, 3, overlaps, 2, rows, 4), 6);  // D
+  EXPECT_EQ(shelfRowFor(5, 3, overlaps, 2, rows, 4), -1);
+  EXPECT_EQ(shelfRowFor(1, 0, nullptr, 0, rows, 4), 3);
+  EXPECT_EQ(shelfPositionFor(0, nullptr, 0), -1);
+  EXPECT_EQ(shelfRowFor(0, 0, nullptr, 0, nullptr, 0), -1);
 }

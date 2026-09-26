@@ -24,10 +24,8 @@
 // are truncated to one line by the widget — more books on the screen, even if
 // half a name is hidden.
 //
-// Only the visible window of rows is materialized per render (strings and
-// ListItems for at most one page). The ordinary shelf therefore keeps one page
-// of strings; an active search additionally uses one fallible uint16_t slot per
-// indexed book so an allocation failure remains recoverable on the C3.
+// Only the visible window of rows is materialized per render. A checked uint16_t
+// map separates books from Markdown and applies search, capped at 8 KiB.
 class LibraryListActivity final : public UiTabListActivity {
  public:
   LibraryListActivity(GfxRenderer& renderer, MappedInputManager& mappedInput);
@@ -127,10 +125,9 @@ class LibraryListActivity final : public UiTabListActivity {
   // Set when the walk finished but the sort did not, so the screen can say the
   // order is discovery order rather than silently showing a wrong one.
   bool degraded = false;
+  bool markdownRefreshed = false;
 
-  // Rows surviving the current query, as positions in the active sort order.
-  // Empty query means no filtering and this owns no allocation, so the ordinary
-  // shelf pays nothing proportional to the library for the feature.
+  // Rows surviving the file-type and query filters, in active sort order.
   std::string query;
   // The active query, pre-quoted for the header: headerTitle() returns a
   // stable c_str the render task can hold across a build.
@@ -161,6 +158,7 @@ class LibraryListActivity final : public UiTabListActivity {
   // book is not in the index), and the current-direction rows to skip, sorted
   // ascending, so unpinned entries map to sort rows with a <=10-step walk.
   uint16_t pinnedAscRows[RecentBooksStore::MAX_RECENT_BOOKS] = {};
+  uint8_t pinnedStoreRows[RecentBooksStore::MAX_RECENT_BOOKS] = {};
   uint16_t overlapRows[RecentBooksStore::MAX_RECENT_BOOKS] = {};
   uint8_t pinnedTotal = 0;
   uint8_t overlapCount = 0;

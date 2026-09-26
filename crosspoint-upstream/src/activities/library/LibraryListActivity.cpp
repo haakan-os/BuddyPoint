@@ -1,10 +1,12 @@
 #include "LibraryListActivity.h"
 
 #include <FreeInkUIIcon.h>
+#include <FsHelpers.h>
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
 #include <LibraryBuilder.h>
+#include <LibraryShelf.h>
 #include <LibraryText.h>
 #include <Logging.h>
 #include <Memory.h>
@@ -33,7 +35,8 @@ constexpr unsigned long LONG_PRESS_MS = 1000;
 constexpr int RECENT_TAB = 0;
 constexpr int TITLE_TAB = 1;
 constexpr int AUTHOR_TAB = 2;
-constexpr int TAB_SLOTS = AUTHOR_TAB + 1;
+constexpr int MARKDOWN_TAB = 3;
+constexpr int TAB_SLOTS = MARKDOWN_TAB + 1;
 
 constexpr bool isDescending(const library::SortOrder order) {
   return order == library::SortOrder::RecentDesc || order == library::SortOrder::TitleDesc ||
@@ -50,12 +53,14 @@ constexpr bool isAuthorSort(const library::SortOrder order) {
 
 constexpr library::SortOrder orderForTab(const int tab, const uint8_t descendingTabs) {
   const bool descending = (descendingTabs & (1u << tab)) != 0;
-  if (tab == TITLE_TAB) return descending ? library::SortOrder::TitleDesc : library::SortOrder::TitleAsc;
+  if (tab == TITLE_TAB || tab == MARKDOWN_TAB)
+    return descending ? library::SortOrder::TitleDesc : library::SortOrder::TitleAsc;
   if (tab == AUTHOR_TAB) return descending ? library::SortOrder::AuthorDesc : library::SortOrder::AuthorAsc;
   return descending ? library::SortOrder::RecentDesc : library::SortOrder::RecentAsc;
 }
 
 const char* tabLabelFor(const int tab) {
+  if (tab == MARKDOWN_TAB) return tr(STR_LIBRARY_TAB_MARKDOWN);
   if (tab == TITLE_TAB) return tr(STR_LIBRARY_TAB_TITLE);
   if (tab == AUTHOR_TAB) return tr(STR_LIBRARY_TAB_AUTHOR);
   return tr(STR_LIBRARY_TAB_RECENT);
@@ -65,8 +70,7 @@ const char* tabLabelFor(const int tab) {
 
 LibraryListActivity::LibraryListActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
     : UiTabListActivity("Library", renderer, mappedInput, true) {
-  // Three short tab labels: a full-slot pill would stretch across a third of
-  // the screen, so cap it at the label plus padding (slots stay put).
+  // Keep short labels centered in their slots without oversized pills.
   tabPillMaxPad = 16;
 }
 
@@ -98,6 +102,7 @@ void LibraryListActivity::onEnter() {
   if (index.isOpen() && index.dedupDegraded()) {
     LOG_ERR("LIB", "index was built without duplicate detection");
   }
+  applyFilter();
   resolvePinned();
 
   // Entered while Confirm was still held (typical when launched from the home
@@ -142,18 +147,21 @@ int LibraryListActivity::selectedEntry() const {
 // list the reader narrowed down on purpose, and the ascending toggle asks for
 // oldest-first, which pinned fresh reads would contradict.
 int LibraryListActivity::pinnedCount() const {
-  if (activeTabIndex != RECENT_TAB || !query.empty() || !isDescending(sortOrder)) return 0;
+  if (filterFailed || activeTabIndex != RECENT_TAB || !query.empty() || !isDescending(sortOrder)) return 0;
   return pinnedTotal;
 }
 
 void LibraryListActivity::resolvePinned() {
   const auto& books = RECENT_BOOKS.getBooks();
-  pinnedTotal = static_cast<uint8_t>(std::min<size_t>(books.size(), RecentBooksStore::MAX_RECENT_BOOKS));
+  pinnedTotal = 0;
+  for (size_t i = 0; i < books.size() && pinnedTotal < RecentBooksStore::MAX_RECENT_BOOKS; ++i) {
+    if (!FsHelpers::hasMarkdownExtension(books[i].path)) pinnedStoreRows[pinnedTotal++] = static_cast<uint8_t>(i);
+  }
   for (int i = 0; i < pinnedTotal; i++) pinnedAscRows[i] = 0xFFFF;
   if (pinnedTotal > 0 && index.isOpen()) {
     library::BookIdentity identities[RecentBooksStore::MAX_RECENT_BOOKS];
     for (int i = 0; i < pinnedTotal; i++) {
-      const std::string& path = books[static_cast<size_t>(i)].path;
+      const std::string& path = books[pinnedStoreRows[i]].path;
       identities[i].pathHash = library::clixPathHash(path.data(), path.size());
       // Size is only a lookup prefilter; 0 (stat failed, e.g. the index handle
       // is the card's one open reader) falls back to hash-only matching.
@@ -180,7 +188,8 @@ void LibraryListActivity::refreshOverlap() {
     if (pinnedAscRows[i] == 0xFFFF || pinnedAscRows[i] >= total) continue;
     const uint16_t row =
         isDescending(sortOrder) ? static_cast<uint16_t>(total - 1 - pinnedAscRows[i]) : pinnedAscRows[i];
-    overlapRows[overlapCount++] = row;
+    const int position = library::shelfPositionFor(row, filtered.get(), filteredCount);
+    if (position >= 0) overlapRows[overlapCount++] = static_cast<uint16_t>(position);
   }
   std::sort(overlapRows, overlapRows + overlapCount);
 }
@@ -190,7 +199,7 @@ void LibraryListActivity::openSelectedBook() {
   if (selectedEntry() < pinnedCount()) {
     const auto& books = RECENT_BOOKS.getBooks();
     if (selectedEntry() >= static_cast<int>(books.size())) return;
-    path = books[static_cast<size_t>(selectedEntry())].path;
+    path = books[pinnedStoreRows[selectedEntry()]].path;
   } else {
     if (!index.isOpen()) return;
     const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(selectedEntry())));
@@ -231,7 +240,7 @@ void LibraryListActivity::onRowLongPress(const int index) {
   if (index < pinnedCount()) {
     const auto& books = RECENT_BOOKS.getBooks();
     if (index < 0 || index >= static_cast<int>(books.size())) return;
-    promptRemoveRecentBook(books[static_cast<size_t>(index)].path, books[static_cast<size_t>(index)].title);
+    promptRemoveRecentBook(books[pinnedStoreRows[index]].path, books[pinnedStoreRows[index]].title);
   } else if (deleteEligible()) {
     promptDeleteBook(index);
   } else if (!groupsCollapsed && groupable()) {
@@ -253,6 +262,7 @@ void LibraryListActivity::promptRemoveRecentBook(const std::string& path, const 
   }
 
   startActivityForResult(std::move(confirmation), [this, path, reopenIndex](const ActivityResult& result) {
+    RenderLock lock(*this);
     swallowHeldReleases();
     if (reopenIndex && !index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
     if (!result.isCancelled && RECENT_BOOKS.removeByPath(path)) {
@@ -345,12 +355,13 @@ void LibraryListActivity::openSearch() {
     return;
   }
   startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
+    RenderLock lock(*this);
     swallowHeldReleases();
     if (result.isCancelled) return;
     query = std::get<KeyboardResult>(result.data).text;
     applyFilter();
     auto& nav = activeNav();
-    if (!query.empty() && filteredCount == 0 && !degraded) {
+    if (!query.empty() && filteredCount == 0) {
       // Up from the tab bar reopens Search even with no results.
       nav.selected = 0;
     } else {
@@ -375,12 +386,24 @@ void LibraryListActivity::onTabAction(const int index) {
 
 void LibraryListActivity::selectTab(const int index, const bool toggleIfActive) {
   if (index < 0 || index >= TAB_SLOTS) return;
+  RenderLock lock(*this);
   if (toggleIfActive && index == activeTab()) descendingTabs ^= static_cast<uint8_t>(1u << index);
+  activeTabIndex = index;
   sortOrder = orderForTab(index, descendingTabs);
+  if (index == MARKDOWN_TAB && !markdownRefreshed) {
+    // Release the row map before the builder allocates its bounded work buffers.
+    filtered.reset();
+    filteredCount = 0;
+    this->index.close();
+    GUI.drawPopup(renderer, tr(STR_LIBRARY_REFRESHING_NOTES));
+    markdownRefreshed = rebuildIndex();
+    if (!this->index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
+    degraded = this->index.isOpen() && this->index.ranksDegraded();
+    resolvePinned();
+  }
   // The filter and the overlap rows hold positions in the old order, so they
   // must be rebuilt.
   applyFilter();
-  activeTabIndex = index;
   refreshOverlap();
   // Tab changes happen only while the bar owns focus. A tab's remembered row
   // must not pull focus back into the list after the switch.
@@ -399,39 +422,28 @@ int LibraryListActivity::activeTab() const { return activeTabIndex; }
 const char* LibraryListActivity::tabLabel(const int index) const { return tabLabelFor(index); }
 
 fui::TabIndicator LibraryListActivity::tabIndicator(const int index) const {
-  if (index != activeTab()) return fui::TabIndicator::None;
+  if (degraded || index != activeTab()) return fui::TabIndicator::None;
   return isDescending(sortOrder) ? fui::TabIndicator::Down : fui::TabIndicator::Up;
 }
 
 int LibraryListActivity::bookRowCount() const {
-  if (!query.empty()) return static_cast<int>(filteredCount);
   // Pinned books already in the index are skipped below the pins, not doubled;
   // pinned books the index missed still show, so the difference stays split.
   const int pinned = pinnedCount();
-  return static_cast<int>(index.bookCount()) + (pinned > 0 ? pinned - overlapCount : 0);
+  return static_cast<int>(filteredCount) + (pinned > 0 ? pinned - overlapCount : 0);
 }
 
 int LibraryListActivity::listCount() const { return groupsCollapsed ? static_cast<int>(groupCount) : bookRowCount(); }
 
-// Entry position on screen to row position in the sort order. Identity while
-// unfiltered and unpinned, so the shelf costs nothing when nothing is typed.
-// With pins active, entries below pinnedCount() belong to the store and must
-// not reach this; the rest walk past the pinned books' own sort rows.
+// Translate through the file-type/search map after skipping pinned duplicates.
 int LibraryListActivity::rowFor(const int entry) const {
-  if (!query.empty()) {
-    if (entry < 0 || entry >= static_cast<int>(filteredCount) || !filtered) return 0;
-    return filtered[entry];
-  }
   const int pinned = pinnedCount();
-  if (pinned == 0) return entry;
-  int row = entry - pinned;
-  for (int i = 0; i < overlapCount; i++) {
-    if (overlapRows[i] <= row) row++;
-  }
-  return row;
+  return library::shelfRowFor(entry, pinned, overlapRows, pinned > 0 ? overlapCount : 0, filtered.get(), filteredCount);
 }
 
-bool LibraryListActivity::groupable() const { return !degraded && !isRecentSort(sortOrder) && bookRowCount() > 0; }
+bool LibraryListActivity::groupable() const {
+  return activeTabIndex != MARKDOWN_TAB && !degraded && !isRecentSort(sortOrder) && bookRowCount() > 0;
+}
 
 uint32_t LibraryListActivity::titleInitialFor(const int entry) {
   const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(rowFor(entry)));
@@ -514,20 +526,18 @@ void LibraryListActivity::restoreExpandedList() {
   requestUpdate();
 }
 
-// One pass over the sort order, keeping what matches. No index, no cache: at the
-// 4096-book format cap this is 4096 comparisons of at most 96 bytes. The result
-// array is allocated once with the exact upper bound and fails back to an
-// explicit message rather than letting vector growth abort the firmware.
+// One checked 2-byte position per indexed file (at most 8 KiB), allocated only
+// when changing shelves/search. Row strings are still read one at a time.
 void LibraryListActivity::applyFilter() {
   groupsCollapsed = false;
   groupCount = 0;
   filtered.reset();
   filteredCount = 0;
   filterFailed = false;
+  overlapCount = 0;
   // The header shows the active query in place of the screen title, so the
   // reader can see what narrowed the list without reopening the keyboard.
   headerSearchTitle = query.empty() ? std::string() : "“" + query + "”";
-  if (query.empty()) return;
 
   // Folded the same way the stored folds were, articles removed included —
   // otherwise "the hobbit" searches for a word no record contains.
@@ -543,26 +553,15 @@ void LibraryListActivity::applyFilter() {
   }
 
   uint16_t matchCount = 0;
-  std::string author;
-  for (int row = 0; row < total; row++) {
-    const uint16_t ordinal = index.ordinalForRow(sortOrder, static_cast<uint16_t>(row));
-    library::ClixRecord record{};
-    if (ordinal == 0xFFFF || !index.readRecord(ordinal, record)) continue;
-    if (library::matchesQuery(std::string_view(record.fold, record.foldLen), needle)) {
-      matches[matchCount++] = static_cast<uint16_t>(row);
-      continue;
-    }
-    // The stored fold covers the title only, so the author has to be read and
-    // folded here. That is the search most worth having: the reader who knows
-    // the author usually also knows where the book is, while "emily" finding
-    // Alice Hunter is the case the shelf exists to answer.
-    author.clear();
-    if (index.readAuthor(record, author) && library::matchesQuery(library::fold(author), needle)) {
-      matches[matchCount++] = static_cast<uint16_t>(row);
-    }
+  if (!library::filterShelf(index, sortOrder, activeTabIndex == MARKDOWN_TAB, needle, matches.get(), total,
+                            matchCount)) {
+    LOG_ERR("LIB", "cannot filter library shelf");
+    filterFailed = true;
+    return;
   }
   filtered = std::move(matches);
   filteredCount = matchCount;
+  refreshOverlap();
 }
 
 void LibraryListActivity::searchActionTrampoline(const fui::ActionEvent&, void* user) {
@@ -579,7 +578,7 @@ bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::s
   if (entry < pinnedCount()) {
     const auto& books = RECENT_BOOKS.getBooks();
     if (entry < 0 || entry >= static_cast<int>(books.size())) return false;
-    const auto& book = books[static_cast<size_t>(entry)];
+    const auto& book = books[pinnedStoreRows[entry]];
     title = book.title;
     author = book.author;
     if (fileName) *fileName = book.path;
@@ -629,7 +628,7 @@ bool LibraryListActivity::handleButtons() {
     } else if (selectedEntry() < pinnedCount()) {
       const auto& books = RECENT_BOOKS.getBooks();
       if (selectedEntry() < static_cast<int>(books.size())) {
-        const auto& book = books[static_cast<size_t>(selectedEntry())];
+        const auto& book = books[pinnedStoreRows[selectedEntry()]];
         promptRemoveRecentBook(book.path, book.title);
       }
     } else if (deleteEligible()) {
@@ -644,6 +643,7 @@ bool LibraryListActivity::handleButtons() {
 
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     if (!query.empty()) {
+      RenderLock lock(*this);
       query.clear();
       applyFilter();
       nav.selected = 0;
@@ -651,7 +651,7 @@ bool LibraryListActivity::handleButtons() {
       requestUpdate();
     } else if (groupsCollapsed) {
       restoreExpandedList();
-    } else if (!tabsFocused() && !degraded) {
+    } else if (!tabsFocused()) {
       // Keep the current list and viewport while returning focus to the tabs.
       nav.selected = 0;
       requestUpdate();
@@ -680,7 +680,7 @@ void LibraryListActivity::navigateButtons() {
     if (count > 0) moveRingTo(ringPos() == count ? 1 : ringPos() + 1);
   });
   buttonNavigator.onPreviousRelease([this, count] {
-    if (tabsFocused() && !degraded) {
+    if (tabsFocused()) {
       openSearch();
     } else if (count > 0) {
       moveRingTo(ringPos() <= 1 ? count : ringPos() - 1);
@@ -829,13 +829,11 @@ void LibraryListActivity::buildHeader(UiScreen& screen) {
   }
   header.trailingStyles = fui::plainStyles(fui::Paint::solid(fui::Color::Black));
   header.borderEdges = fui::EdgeBottom;
-  if (!degraded) {
-    header.trailingIcon = fui::bitmapFromIcon(icon_search_32);
-    header.trailingAction = ACTION_SEARCH;
-    const int titleFontId = uiScaleSpec().titleFontId;
-    header.actionOffsetY =
-        static_cast<int16_t>((renderer.getLineHeight(titleFontId) - renderer.getTextHeight(titleFontId)) / 2);
-  }
+  header.trailingIcon = fui::bitmapFromIcon(icon_search_32);
+  header.trailingAction = ACTION_SEARCH;
+  const int titleFontId = uiScaleSpec().titleFontId;
+  header.actionOffsetY =
+      static_cast<int16_t>((renderer.getLineHeight(titleFontId) - renderer.getTextHeight(titleFontId)) / 2);
   const auto frameRect = screen.frame().screen();
   // Header and tabs share a screen-relative boundary, independent of bezel insets.
   fui::header(screen.frame(),
@@ -853,13 +851,14 @@ void LibraryListActivity::buildScreen(UiScreen& screen) {
   screen.setContentMarginFromScreen(fui::Insets{static_cast<int16_t>(metrics.topPadding + metrics.headerHeight), 0,
                                                 static_cast<int16_t>(metrics.buttonHintsHeight + readoutReserved), 0});
 
-  if (!degraded) buildTabBar(screen);
+  buildTabBar(screen);
   if (bookRowCount() == 0) {
-    const char* message = tr(STR_LIBRARY_NO_RESULTS);
+    const char* message =
+        activeTabIndex == MARKDOWN_TAB ? tr(STR_LIBRARY_NOTES_NO_RESULTS) : tr(STR_LIBRARY_NO_RESULTS);
     if (filterFailed) {
-      message = tr(STR_LIBRARY_SEARCH_UNAVAILABLE);
+      message = tr(STR_LIBRARY_SHELF_UNAVAILABLE);
     } else if (query.empty()) {
-      message = tr(STR_LIBRARY_EMPTY);
+      message = activeTabIndex == MARKDOWN_TAB ? tr(STR_LIBRARY_NOTES_EMPTY) : tr(STR_LIBRARY_EMPTY);
     }
     screen.centeredText(message);
     return;
@@ -878,7 +877,9 @@ void LibraryListActivity::drawPositionReadout() const {
   if (count <= 0) return;
 
   char buf[32];
-  const char* positionFormat = groupsCollapsed ? tr(STR_LIBRARY_GROUP_POSITION) : tr(STR_LIBRARY_POSITION);
+  const char* positionFormat = groupsCollapsed                  ? tr(STR_LIBRARY_GROUP_POSITION)
+                               : activeTabIndex == MARKDOWN_TAB ? tr(STR_LIBRARY_NOTES_POSITION)
+                                                                : tr(STR_LIBRARY_POSITION);
   snprintf(buf, sizeof(buf), positionFormat, selectedEntry() + 1, count);
   const auto& metrics = UITheme::getInstance().getMetrics();
   const int width = renderer.getTextWidth(SMALL_FONT_ID, buf);
@@ -918,7 +919,7 @@ void LibraryListActivity::drawFooter() {
   const bool backGoesHome = tabsFocused() && !groupsCollapsed && query.empty();
   const char* backLabel = backGoesHome ? tr(STR_HOME) : tr(STR_BACK);
   const char* confirmLabel = groupsCollapsed ? tr(STR_SELECT) : tr(STR_OPEN);
-  const bool canSearch = tabsFocused() && !degraded;
+  const bool canSearch = tabsFocused();
   const auto labels = mappedInput.mapLabels(backLabel, tabsFocused() ? tr(STR_TOGGLE) : confirmLabel,
                                             canSearch ? tr(STR_SEARCH) : tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);

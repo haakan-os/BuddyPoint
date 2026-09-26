@@ -18,8 +18,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lua5.4 libexpat1-dev zlib1g-dev
       - name: Test KOReader notes and transfers
         run: lua scripts/test_notes.lua
-      - name: Test Markdown and OTA
+      - name: Test library, Markdown and OTA
         run: |
           cmake -S crosspoint-upstream/test -B /tmp/tests
-          cmake --build /tmp/tests --target MarkdownChecklistTest MarkdownDocumentTest MarkdownTest OtaReleaseTest ReleaseJsonParserTest -j2
-          ctest --test-dir /tmp/tests -R '^(Markdown|OtaRelease|ReleaseJsonParser)' --output-on-failure
+          cmake --build /tmp/tests --target LibraryBuilderTest LibraryIndexFileTest MarkdownChecklistTest MarkdownDocumentTest MarkdownTest OtaReleaseTest ReleaseJsonParserTest -j2
+          ctest --test-dir /tmp/tests -R '^(LibraryBuilderTest|LibraryIndexFile|LibraryShelf|Markdown|OtaRelease|ReleaseJsonParser)' --output-on-failure

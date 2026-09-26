@@ -18,7 +18,7 @@ This works with the current BuddyPoint firmware (1.6.7); no firmware update is n
    On Windows, use `py` instead of `python3` and a path such as `"C:\Users\YourName\OneDrive\BuddyPoint Notes"`.
 
 5. Run the same command without `--dry-run` to sync. If `haakanpoint.local` cannot be found, add `--device 192.168.1.42`, using the address shown on the reader. Continue using the same address/hostname for later runs.
-6. When sync finishes, leave BuddySync and open **Apps → Markdown viewer → OneDriveNotes**. Open a note and use its **Checklist** menu to tick tasks. Return to BuddySync and run the tool again to copy those edits back to the computer; OneDrive will then upload them to the cloud.
+6. When sync finishes, leave BuddySync and open **Library → Markdown** on firmware **1.6.8 or newer**. That tab refreshes the index when first opened and shows notes separately from books, including notes in custom sync folders. On older firmware, use **Apps → Markdown viewer → OneDriveNotes**. Open a note and use its **Checklist** menu to tick tasks. Return to BuddySync and run the tool again to copy those edits back to the computer; OneDrive will then upload them to the cloud.
 
 This syncs Markdown files, not OneNote notebooks, Word files or images. The first version processes files directly inside the chosen folder; subfolders and hidden files are ignored. Each note can be up to 8 MiB. The reader directory defaults to `/OneDriveNotes`, separate from `/BuddyNotes` used by KOReader exports.
 

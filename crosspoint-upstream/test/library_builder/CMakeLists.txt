@@ -4,6 +4,7 @@ add_executable(LibraryBuilderTest
   ${REPO_ROOT}/lib/LibraryIndex/LibraryIndexFile.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryFormat.cpp
   ${REPO_ROOT}/lib/LibraryIndex/LibraryText.cpp
+  ${REPO_ROOT}/lib/LibraryIndex/LibraryShelf.cpp
   ${REPO_ROOT}/lib/Utf8/Utf8.cpp
 )
 target_include_directories(LibraryBuilderTest PRIVATE
