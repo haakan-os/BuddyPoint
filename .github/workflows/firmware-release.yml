@@ -50,8 +50,8 @@ jobs:
           sudo apt-get update && sudo apt-get install -y lua5.4 libexpat1-dev zlib1g-dev
           lua scripts/test_notes.lua
           cmake -S crosspoint-upstream/test -B /tmp/firmware-tests
-          cmake --build /tmp/firmware-tests --target OtaReleaseTest ReleaseJsonParserTest MarkdownTest MarkdownDocumentTest MarkdownChecklistTest -j2
-          ctest --test-dir /tmp/firmware-tests -R '^(Markdown|OtaRelease|ReleaseJsonParser)' --output-on-failure
+          cmake --build /tmp/firmware-tests --target OtaReleaseTest ReleaseJsonParserTest MarkdownTest MarkdownDocumentTest MarkdownChecklistTest NoteToolsTest -j2
+          ctest --test-dir /tmp/firmware-tests -R '^(NoteToolsTest|Markdown|OtaRelease|ReleaseJsonParser)' --output-on-failure
       - name: Build X3/X4 release firmware
         working-directory: crosspoint-upstream
         run: pio run -e gh_release -j2

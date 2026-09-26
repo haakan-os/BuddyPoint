@@ -9,7 +9,8 @@
 
 namespace library {
 bool filterShelf(LibraryIndexFile& index, const SortOrder order, const bool markdown,
-                 const std::string_view foldedQuery, uint16_t* rows, const uint16_t capacity, uint16_t& count) {
+                 const std::string_view foldedQuery, uint16_t* rows, const uint16_t capacity, uint16_t& count,
+                 const bool allTypes) {
   count = 0;
   if (capacity < index.bookCount() || (index.bookCount() > 0 && !rows)) return false;
   uint16_t matched = 0;
@@ -19,7 +20,7 @@ bool filterShelf(LibraryIndexFile& index, const SortOrder order, const bool mark
     const uint16_t ordinal = index.ordinalForRow(order, row);
     ClixRecord record{};
     if (ordinal == 0xFFFF || !index.readRecord(ordinal, record) || !index.readName(record, name)) return false;
-    if (FsHelpers::hasMarkdownExtension(name) != markdown) continue;
+    if (!allTypes && FsHelpers::hasMarkdownExtension(name) != markdown) continue;
     if (foldedQuery.empty() || matchesQuery(std::string_view(record.fold, record.foldLen), foldedQuery)) {
       rows[matched++] = row;
       continue;

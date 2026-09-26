@@ -10,6 +10,7 @@
 #include <LibraryText.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <NoteTools.h>
 #include <Utf8.h>
 
 #include <algorithm>
@@ -36,7 +37,8 @@ constexpr int RECENT_TAB = 0;
 constexpr int TITLE_TAB = 1;
 constexpr int AUTHOR_TAB = 2;
 constexpr int MARKDOWN_TAB = 3;
-constexpr int TAB_SLOTS = MARKDOWN_TAB + 1;
+constexpr int FAVOURITES_TAB = 4;
+constexpr int TAB_SLOTS = FAVOURITES_TAB + 1;
 
 constexpr bool isDescending(const library::SortOrder order) {
   return order == library::SortOrder::RecentDesc || order == library::SortOrder::TitleDesc ||
@@ -53,13 +55,14 @@ constexpr bool isAuthorSort(const library::SortOrder order) {
 
 constexpr library::SortOrder orderForTab(const int tab, const uint8_t descendingTabs) {
   const bool descending = (descendingTabs & (1u << tab)) != 0;
-  if (tab == TITLE_TAB || tab == MARKDOWN_TAB)
+  if (tab == TITLE_TAB || tab == MARKDOWN_TAB || tab == FAVOURITES_TAB)
     return descending ? library::SortOrder::TitleDesc : library::SortOrder::TitleAsc;
   if (tab == AUTHOR_TAB) return descending ? library::SortOrder::AuthorDesc : library::SortOrder::AuthorAsc;
   return descending ? library::SortOrder::RecentDesc : library::SortOrder::RecentAsc;
 }
 
 const char* tabLabelFor(const int tab) {
+  if (tab == FAVOURITES_TAB) return tr(STR_FAVOURITES);
   if (tab == MARKDOWN_TAB) return tr(STR_LIBRARY_TAB_MARKDOWN);
   if (tab == TITLE_TAB) return tr(STR_LIBRARY_TAB_TITLE);
   if (tab == AUTHOR_TAB) return tr(STR_LIBRARY_TAB_AUTHOR);
@@ -390,7 +393,7 @@ void LibraryListActivity::selectTab(const int index, const bool toggleIfActive) 
   if (toggleIfActive && index == activeTab()) descendingTabs ^= static_cast<uint8_t>(1u << index);
   activeTabIndex = index;
   sortOrder = orderForTab(index, descendingTabs);
-  if (index == MARKDOWN_TAB && !markdownRefreshed) {
+  if ((index == MARKDOWN_TAB || index == FAVOURITES_TAB) && !markdownRefreshed) {
     // Release the row map before the builder allocates its bounded work buffers.
     filtered.reset();
     filteredCount = 0;
@@ -442,7 +445,8 @@ int LibraryListActivity::rowFor(const int entry) const {
 }
 
 bool LibraryListActivity::groupable() const {
-  return activeTabIndex != MARKDOWN_TAB && !degraded && !isRecentSort(sortOrder) && bookRowCount() > 0;
+  return activeTabIndex != MARKDOWN_TAB && activeTabIndex != FAVOURITES_TAB && !degraded && !isRecentSort(sortOrder) &&
+         bookRowCount() > 0;
 }
 
 uint32_t LibraryListActivity::titleInitialFor(const int entry) {
@@ -553,11 +557,24 @@ void LibraryListActivity::applyFilter() {
   }
 
   uint16_t matchCount = 0;
-  if (!library::filterShelf(index, sortOrder, activeTabIndex == MARKDOWN_TAB, needle, matches.get(), total,
-                            matchCount)) {
+  if (!library::filterShelf(index, sortOrder, activeTabIndex == MARKDOWN_TAB, needle, matches.get(), total, matchCount,
+                            activeTabIndex == FAVOURITES_TAB)) {
     LOG_ERR("LIB", "cannot filter library shelf");
     filterFailed = true;
     return;
+  }
+  if (activeTabIndex == FAVOURITES_TAB) {
+    uint16_t kept = 0;
+    std::string path;
+    for (uint16_t i = 0; i < matchCount; ++i) {
+      library::ClixRecord record{};
+      if (!index.readRecord(index.ordinalForRow(sortOrder, matches[i]), record) || !index.readPath(record, path)) {
+        filterFailed = true;
+        return;
+      }
+      if (notes::isFavourite(path)) matches[kept++] = matches[i];
+    }
+    matchCount = kept;
   }
   filtered = std::move(matches);
   filteredCount = matchCount;
@@ -860,6 +877,7 @@ void LibraryListActivity::buildScreen(UiScreen& screen) {
     } else if (query.empty()) {
       message = activeTabIndex == MARKDOWN_TAB ? tr(STR_LIBRARY_NOTES_EMPTY) : tr(STR_LIBRARY_EMPTY);
     }
+    if (activeTabIndex == FAVOURITES_TAB && !filterFailed) message = tr(STR_FAVOURITES_EMPTY);
     screen.centeredText(message);
     return;
   }

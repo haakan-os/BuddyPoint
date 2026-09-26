@@ -8,7 +8,7 @@ import struct
 import zipfile
 
 # Bump when generated output changes so unchanged notes refresh on the next sync.
-RENDERER_VERSION = 3
+RENDERER_VERSION = 4
 MAGIC = b"BUDMATH1"
 HEADER = struct.Struct("<8sIQIQ")
 MAX_BUNDLE = 8 * 1024 * 1024
@@ -112,7 +112,7 @@ def math_block(state, start, end, silent):
     return True
 
 
-def render_note(source, title, report=lambda message: None):
+def render_note(source, title, report=lambda message: None, assets=None, size=26):
     """Return a checked EPUB sidecar or None. The source bytes are never rewritten."""
     from buddy_math_layout import MathLayout
     MarkdownIt, ziamath, rasterize, convert, Image = dependencies()
@@ -124,12 +124,34 @@ def render_note(source, title, report=lambda message: None):
     md.block.ruler.before("fence", "buddy_math", math_block,
                           {"alt": ["paragraph", "reference", "blockquote", "list"]})
     md.inline.ruler.before("escape", "buddy_math", math_inline)
+    from buddy_note_assets import wiki_image
+    md.inline.ruler.before('image', 'buddy_wiki_image', wiki_image)
     tokens = md.parse(text)
-    if not any(child.type.startswith('buddy_math_') for token in tokens for child in (token.children or [])):
+    if not any(child.type.startswith('buddy_math_') or (assets is not None and child.type == 'image')
+               for token in tokens for child in (token.children or [])):
         return None
-    layout = MathLayout(ziamath, rasterize, convert, Image, report)
+    if not 18 <= size <= 40:
+        raise ValueError('Math size must be between 18 and 40')
+    layout = MathLayout(ziamath, rasterize, convert, Image, report, size=size)
+    def render_image(token):
+        data = (assets or {}).get(token.attrGet('src'))
+        if data is None:
+            return '[' + escape(token.content) + ']'
+        from buddy_note_assets import jpeg_image
+        try:
+            data = jpeg_image(data)
+        except (ValueError, OSError) as error:
+            report(f'Image kept as text: {error}')
+            return '[' + escape(token.content) + ']'
+        if layout.image_bytes + len(data) > 7 * 1024 * 1024 or len(layout.images) >= 2048:
+            raise ValueError('Rendered note exceeds the image size/count limit')
+        name = f'asset-{len(layout.images)}.jpg'
+        layout.images.append((name, data))
+        layout.image_bytes += len(data)
+        return f'<img src="{name}" alt="{escape(token.content, quote=True)}" />'
+    layout.image_renderer = render_image
     headings = []
-    md.renderer.rules["image"] = lambda ts, i, opts, env: "[" + escape(ts[i].content) + "]"
+    md.renderer.rules["image"] = lambda ts, i, opts, env: render_image(ts[i])
     md.renderer.rules["link_open"] = lambda *args: ""
     md.renderer.rules["link_close"] = lambda *args: ""
     md.renderer.rules["buddy_rendered"] = lambda ts, i, opts, env: ts[i].content

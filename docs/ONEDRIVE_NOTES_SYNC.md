@@ -20,7 +20,7 @@ This works with the current BuddyPoint firmware (1.6.7); no firmware update is n
 5. Run the same command without `--dry-run` to sync. If `haakanpoint.local` cannot be found, add `--device 192.168.1.42`, using the address shown on the reader. Continue using the same address/hostname for later runs.
 6. When sync finishes, leave BuddySync and open **Library → Markdown** on firmware **1.6.8 or newer**. That tab refreshes the index when first opened and shows notes separately from books, including notes in custom sync folders. On older firmware, use **Apps → Markdown viewer → OneDriveNotes**. Open a note and use its **Checklist** menu to tick tasks. Return to BuddySync and run the tool again to copy those edits back to the computer; OneDrive will then upload them to the cloud.
 
-This syncs Markdown files recursively, not OneNote notebooks, Word files or images. Subfolder paths are preserved in both directions: `Work/Tasks.md` becomes `/OneDriveNotes/Work/Tasks.md` on the reader. Required folders are created automatically; empty folders and hidden files/folders are not copied. Each note can be up to 8 MiB. Scans stop with an error beyond 32 path components or 10,000 entries rather than silently skipping deeper content. The reader directory defaults to `/OneDriveNotes`, separate from `/BuddyNotes` used by KOReader exports. Use `--reader-folder "/MyNotes"` to choose another destination.
+This syncs Markdown files recursively, not OneNote notebooks or Word files. With `--math`, referenced local images are embedded in a viewing copy. Subfolder paths are preserved in both directions: `Work/Tasks.md` becomes `/OneDriveNotes/Work/Tasks.md` on the reader. Required folders are created automatically; empty folders and hidden files/folders are not copied. Each note can be up to 8 MiB. Scans stop with an error beyond 32 path components or 10,000 entries rather than silently skipping deeper content. The reader directory defaults to `/OneDriveNotes`, separate from `/BuddyNotes` used by KOReader exports. Use `--reader-folder "/MyNotes"` to choose another destination.
 
 The firmware's Library index scans up to five folder levels below the SD root. Notes nested more deeply can still sync, but may require the Markdown file browser to locate them.
 
@@ -80,8 +80,7 @@ python3 companion/notes-sync/buddy_notes_sync.py --folder "/path/to/OneDrive/Not
 ```
 
 If you are already inside `companion/notes-sync`, use `requirements-math.txt`
-and `buddy_notes_sync.py` without the directory prefix. Keep `buddy_math.py` and
-`buddy_math_layout.py` beside the sync script. Python 3.9 is supported, including
+and `buddy_notes_sync.py` without the directory prefix. Keep every `buddy_*.py` module from this directory beside the sync script. Python 3.9 is supported, including
 the macOS system Python; newer Python versions use newer compatible packages.
 
 Keep any existing `--reader-folder`, `--watch` and other options. For example:
@@ -133,8 +132,8 @@ again and reopen to see updated maths. Reading position/pagination resets when
 the reading copy changes.
 
 Notes without maths keep native Markdown rendering. Math-enabled notes use
-CommonMark plus tables; ordinary image references still show their descriptions,
-links show labels, and raw HTML is displayed as text. Expressions are limited to
+CommonMark plus tables; local images are embedded (table images show descriptions),
+links show labels in the page and are available through the v1.7.0 Note links menu, and raw HTML is displayed as text. Expressions are limited to
 4,096 characters, 512 equations per note, 2,048 unique image assets, and 8 MiB per
 reading copy (up to 7 MiB of image data). Invalid expressions remain text; a note
 that exceeds the total reading-copy limit still syncs as original Markdown.
@@ -152,3 +151,23 @@ into your notes folder, sync with `--math`, close BuddySync and open the note.
 Check the matrix, cases, crossed-out factors, wrapped inline text and long equality
 chain. Also confirm checklists still work. Host tests cannot verify the physical
 e-ink screen.
+
+
+## Study tools in v1.7.0
+
+Update firmware through OTA and update the entire `companion/notes-sync` directory.
+The new **Note links**, **Flashcards**, and **Library → Favourites** features are
+explained in the [companion guide](../companion/notes-sync/README.md#note-links-flashcards-and-favourites-v170).
+Plain sync generates links and `Question :: Answer` cards without extra dependencies.
+Use `--math` for images and equations; optionally add `--math-size 32` (18–40).
+Image changes and size changes refresh viewing copies automatically. Sync completion
+now reports uploads, downloads, conflicts, unchanged notes and rendering updates.
+
+Image references support relative paths and Obsidian `![[attachment.png]]` syntax.
+Only local PNG/JPEG/GIF/WebP/BMP images within the chosen notes folder are embedded;
+unique bare filenames can resolve inside attachment subfolders. Missing, ambiguous,
+remote or unsupported images keep their description and produce a terminal message.
+Limits: 128 references, 8 MiB per source image, 16 megapixels per image, and 32 MiB
+combined source image bytes per note, within the existing 8 MiB viewing-copy limit.
+Images are resized to at most 420 × 500 pixels and converted to baseline grayscale JPEG.
+Source files are unchanged and images are not synced back from the reader.

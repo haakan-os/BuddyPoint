@@ -64,9 +64,11 @@ def safe_mathml(convert, expression, inline):
 
 
 class MathLayout:
-    def __init__(self, ziamath, rasterize, convert, Image, report):
+    def __init__(self, ziamath, rasterize, convert, Image, report, size=SIZE, image_renderer=None):
         self.zm, self.rasterize, self.convert, self.Image = ziamath, rasterize, convert, Image
         self.report = report
+        self.size = size
+        self.image_renderer = image_renderer
         self.images = []
         self.image_lookup = {}
         self.image_bytes = 0
@@ -81,7 +83,7 @@ class MathLayout:
             ET.SubElement(root, 'mtext', mathvariant=style).text = value
             if len(self.text_cache) >= 2048:
                 self.text_cache.clear()
-            self.text_cache[key] = self.zm.Math(root, size=SIZE)
+            self.text_cache[key] = self.zm.Math(root, size=self.size)
         return self.text_cache[key]
 
     def equation(self, value, inline, count=True):
@@ -91,7 +93,7 @@ class MathLayout:
         key = (value, inline)
         if key not in self.math_cache:
             root = safe_mathml(self.convert, value, inline)
-            obj = self.zm.Math(root, size=SIZE)
+            obj = self.zm.Math(root, size=self.size)
             w, h = obj.getsize()
             if not all(math.isfinite(n) and 0 <= n <= 4096 for n in (w, h)):
                 raise ValueError('equation is too large')
@@ -229,7 +231,8 @@ class MathLayout:
             elif token.type == 'code_inline':
                 prose(token.content, 'monospace')
             elif token.type == 'image':
-                prose('[' + token.content + ']', style)
+                flush()
+                output.append(self.image_renderer(token) if self.image_renderer else '[' + escape(token.content) + ']')
             elif token.type == 'softbreak':
                 prose(' ', style)
             elif token.type == 'hardbreak':

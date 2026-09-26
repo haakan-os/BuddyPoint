@@ -7,3 +7,5 @@ The firmware test opens this fixture through the normal Markdown document path
 and checks its embedded PNG and EPUB contents. Companion tests check the current
 JPEG output, its source fingerprint, and automatic regeneration of v1 copies.
 The binary sidecar format is unchanged.
+
+`tools.md` and `tools.bnotes` are a Python-generated navigation/card protocol fixture, validated by `NoteToolsTest`.

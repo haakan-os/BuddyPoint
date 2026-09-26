@@ -512,3 +512,18 @@ TEST(LibraryShelf, PinnedDuplicatesUseFilteredPositionsAndNeverOpenNotes) {
   EXPECT_EQ(shelfPositionFor(0, nullptr, 0), -1);
   EXPECT_EQ(shelfRowFor(0, 0, nullptr, 0, nullptr, 0), -1);
 }
+
+TEST_F(LibraryBuilderTest, MixedShelfIncludesBooksAndNotesForFavourites) {
+  initial();
+  fake::add("/CustomNotes/new.md");
+  ASSERT_TRUE(buildLibraryIndex("/", stats, true));
+  LibraryIndexFile index;
+  ASSERT_TRUE(index.open(INDEX));
+  uint16_t rows[3] = {};
+  uint16_t count = 0;
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, false, "", rows, 3, count, true));
+  EXPECT_EQ(count, 3);
+  ASSERT_TRUE(filterShelf(index, SortOrder::TitleAsc, false, "new", rows, 3, count, true));
+  ASSERT_EQ(count, 1);
+  EXPECT_EQ(pathAt(index, SortOrder::TitleAsc, rows[0]), "/CustomNotes/new.md");
+}

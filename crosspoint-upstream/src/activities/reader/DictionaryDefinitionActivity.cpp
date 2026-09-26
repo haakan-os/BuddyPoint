@@ -37,7 +37,9 @@ void DictionaryDefinitionActivity::onEnter() {
   // Normalize StarDict multi-type separators so the wrap loop and the
   // C-string font APIs below both see the whole definition.
   std::replace(definition.begin(), definition.end(), '\0', '\n');
-  if (!(htmlDefinition && definition.size() <= MAX_STYLED_HTML_BYTES && layoutHtmlPages())) {
+  if (!reverseText.empty()) {
+    wrapText();
+  } else if (!(htmlDefinition && definition.size() <= MAX_STYLED_HTML_BYTES && layoutHtmlPages())) {
     definition = htmlToPlainText(definition);
     wrapText();
   }
@@ -198,6 +200,16 @@ void DictionaryDefinitionActivity::wrapText() {
 }
 
 void DictionaryDefinitionActivity::loop() {
+  if (!reverseText.empty() && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    {
+      RenderLock lock;
+      definition.swap(reverseText);
+      showingAnswer = !showingAnswer;
+      wrapText();
+    }
+    requestUpdate();
+    return;
+  }
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     finish();
     return;
@@ -291,8 +303,9 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   scope.endScanAndPrewarm();
   drawBody(fontId, contentX + SIDE_PADDING, bodyStartY);
 
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), "", (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
+  const auto labels = mappedInput.mapLabels(
+      tr(STR_BACK), reverseText.empty() ? "" : (showingAnswer ? tr(STR_NOTE_QUESTION) : tr(STR_NOTE_REVEAL)),
+      (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

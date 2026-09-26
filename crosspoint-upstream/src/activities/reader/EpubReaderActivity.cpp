@@ -12,6 +12,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <NoteTools.h>
 #include <esp_system.h>
 
 #include <algorithm>
@@ -41,6 +42,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/apps/MarkdownChecklistActivity.h"
+#include "activities/apps/NoteToolsActivity.h"
 #include "activities/settings/TextSettingsActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -424,6 +426,10 @@ void EpubReaderActivity::loop() {
 
   const auto touch = ReaderUtils::detectTouchPageTurn(renderer, mappedInput);
 
+  if (showFavouriteMessage && millis() - favouriteMessageTime >= ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS) {
+    showFavouriteMessage = false;
+    requestUpdate();
+  }
   if (showBookmarkMessage && (millis() - bookmarkMessageTime) >= ReaderUtils::BOOKMARK_MESSAGE_DURATION_MS) {
     showBookmarkMessage = false;
     requestUpdate();
@@ -912,6 +918,32 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         pendingScreenshot = true;
       }
       requestUpdate();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::FAVOURITE: {
+      {
+        RenderLock lock;
+        const bool existed = notes::isFavourite(bookPath);
+        favouriteMessage = notes::toggleFavourite(bookPath)
+                               ? (existed ? StrId::STR_FAVOURITE_REMOVED : StrId::STR_FAVOURITE_ADDED)
+                               : StrId::STR_FAVOURITE_FAILED;
+        showFavouriteMessage = true;
+        favouriteMessageTime = millis();
+      }
+      requestUpdate();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::NOTE_LINKS:
+    case EpubReaderMenuActivity::MenuAction::NOTE_STUDY: {
+      if (!FsHelpers::hasMarkdownExtension(bookPath)) break;
+      // Bounded labels live with this screen; replacing releases EPUB page buffers.
+      auto activity = makeUniqueNoThrow<NoteToolsActivity>(renderer, mappedInput, bookPath,
+                                                           action == EpubReaderMenuActivity::MenuAction::NOTE_STUDY);
+      if (!activity) {
+        LOG_ERR("NOTES", "OOM: notes tools");
+        break;
+      }
+      activityManager.replaceActivity(std::move(activity));
       break;
     }
     case EpubReaderMenuActivity::MenuAction::CHECKLIST: {
@@ -1443,6 +1475,7 @@ void EpubReaderActivity::renderBook() {
     ScreenshotUtil::takeScreenshot(renderer);
   }
 
+  if (showFavouriteMessage) GUI.drawPopup(renderer, I18N.get(favouriteMessage));
   if (showBookmarkMessage) {
     GUI.drawPopup(renderer, bookmarkRemoved ? tr(STR_BOOKMARK_REMOVED) : tr(STR_BOOKMARK_ADDED));
   }

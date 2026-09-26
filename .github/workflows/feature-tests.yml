@@ -21,5 +21,5 @@ jobs:
       - name: Test library, Markdown and OTA
         run: |
           cmake -S crosspoint-upstream/test -B /tmp/tests
-          cmake --build /tmp/tests --target LibraryBuilderTest LibraryIndexFileTest MarkdownChecklistTest MarkdownDocumentTest MarkdownTest OtaReleaseTest ReleaseJsonParserTest -j2
-          ctest --test-dir /tmp/tests -R '^(LibraryBuilderTest|LibraryIndexFile|LibraryShelf|Markdown|OtaRelease|ReleaseJsonParser)' --output-on-failure
+          cmake --build /tmp/tests --target LibraryBuilderTest LibraryIndexFileTest MarkdownChecklistTest NoteToolsTest MarkdownDocumentTest MarkdownTest OtaReleaseTest ReleaseJsonParserTest -j2
+          ctest --test-dir /tmp/tests -R '^(LibraryBuilderTest|LibraryIndexFile|LibraryShelf|NoteToolsTest|Markdown|OtaRelease|ReleaseJsonParser)' --output-on-failure

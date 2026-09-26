@@ -14,3 +14,9 @@ add_executable(MarkdownChecklistTest MarkdownChecklistTest.cpp ../../lib/Markdow
 target_include_directories(MarkdownChecklistTest PRIVATE stubs ../../lib/Markdown ../../lib/AtomicFile ../../lib/Serialization ../../lib/Memory)
 target_link_libraries(MarkdownChecklistTest PRIVATE crosspoint_test_common GTest::gtest_main)
 gtest_discover_tests(MarkdownChecklistTest)
+
+add_executable(NoteToolsTest NoteToolsTest.cpp ../../lib/Markdown/NoteTools.cpp)
+target_include_directories(NoteToolsTest PRIVATE stubs ../../lib/Markdown ../../lib/AtomicFile)
+target_link_libraries(NoteToolsTest PRIVATE crosspoint_test_common GTest::gtest_main)
+target_compile_definitions(NoteToolsTest PRIVATE MARKDOWN_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+gtest_discover_tests(NoteToolsTest)

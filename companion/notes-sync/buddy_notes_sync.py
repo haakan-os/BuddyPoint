@@ -275,10 +275,12 @@ class Reader:
 
 
 class Sync:
-    def __init__(self, folder, reader, state_dir, dry_run=False, report=progress, math=False):
+    def __init__(self, folder, reader, state_dir, dry_run=False, report=progress, math=False, math_size=26):
         self.folder, self.reader, self.state_dir = folder.resolve(), reader, state_dir
         self.dry_run, self.report = dry_run, report
         self.math = math
+        self.math_size = math_size
+        self.summary = dict(uploaded=0, downloaded=0, conflicts=0, unchanged=0, rendered=0, helpers=0, skipped=0)
         self.pending_path = state_dir / "pending.json"
         self.state_path = state_dir / "state.json"
         self.identity = {"folder": str(folder), "reader": reader.address, "remote": reader.folder}
@@ -412,7 +414,7 @@ class Sync:
         for name in sorted(names):
             self.report(f"Checking equations: {name}")
             source = self.local(name)
-            if source is None or b"$" not in source:
+            if source is None or not any(marker in source for marker in (b"$", b"![")):
                 continue
             if self.dry_run:
                 self.report(f"Preview equation rendering: {name}")
@@ -420,14 +422,24 @@ class Sync:
             if self.reader.read(name) != source:
                 self.report(f"Equation rendering deferred; note changed: {name}")
                 continue
-            key = digest(f"buddy-math-v{RENDERER_VERSION}\0".encode() + name.encode("utf-8") + b"\0" + source)
+            from buddy_note_assets import collect_assets, asset_fingerprint
+            try:
+                assets = collect_assets(source, self.folder, name, lambda message: self.report(f"{name}: {message}"))
+            except (ValueError, UnicodeError) as error:
+                self.report(f"Images skipped for {name}: {error}")
+                self.summary['skipped'] += 1
+                continue
+            key = digest(f"buddy-math-v{RENDERER_VERSION}:{self.math_size}\0".encode() + name.encode("utf-8")
+                         + b"\0" + source + asset_fingerprint(assets))
             cache = self.state_dir / "math" / (key + ".bmath")
             self.report(f"{'Using cached' if cache.exists() else 'Rendering'} equations: {name}")
             try:
                 bundle = cache.read_bytes() if cache.exists() else render_note(
-                    source, PurePosixPath(name).stem, lambda message: self.report(f"{name}: {message}"))
+                    source, PurePosixPath(name).stem, lambda message: self.report(f"{name}: {message}"),
+                    assets=assets, size=self.math_size)
             except ValueError as error:
                 self.report(f"Math skipped for {name}: {error}")
+                self.summary["skipped"] += 1
                 continue
             if bundle is None:
                 continue
@@ -443,6 +455,29 @@ class Sync:
                 raise SyncError(f"Refusing to replace an unrecognised math sidecar: {target}")
             self.report(f"Upload equations: {name}")
             self.put_remote(target, bundle, previous)
+            self.summary['rendered'] += 1
+
+    def sync_tools(self, names):
+        from buddy_note_tools import MAGIC, render_tools, tools_name
+        for name in sorted(names):
+            self.report(f"Checking links and flashcards: {name}")
+            source = self.local(name)
+            if source is None or self.dry_run or self.reader.read(name) != source:
+                continue
+            try:
+                bundle = render_tools(source, name, names, self.reader.folder,
+                                      lambda message: self.report(f'{name}: {message}'))
+            except UnicodeError:
+                self.summary['skipped'] += 1
+                continue
+            target = tools_name(name)
+            previous = self.reader.read(target)
+            if previous == bundle or (previous is None and len(bundle) == 34):
+                continue
+            if previous is not None and not previous.startswith(MAGIC):
+                raise SyncError(f'Refusing to replace an unrecognised notes sidecar: {target}')
+            self.put_remote(target, bundle, previous)
+            self.summary["helpers"] += 1
 
     def run(self):
         self.report(f"Connecting to reader: {self.reader.address}")
@@ -465,16 +500,19 @@ class Sync:
             self.archive(local)
             self.archive(remote)
             if local == remote:
+                self.summary["unchanged"] += 1
                 if local is not None:
                     self.remember(name, local)
                 continue
             baseline = self.state["files"].get(name)
             if local is None or (remote is not None and digest(local) == baseline):
+                self.summary["downloaded"] += 1
                 self.report(f"Download: {name}")
                 if not self.dry_run:
                     self.put_local(name, remote, local)
                     self.remember(name, remote)
             elif remote is None or digest(remote) == baseline:
+                self.summary["uploaded"] += 1
                 self.report(f"Upload: {name}")
                 if not self.dry_run:
                     if self.local(name) != local:
@@ -484,6 +522,7 @@ class Sync:
             else:
                 # Leave the computer version at the original name. Publish the
                 # reader version as a separate note on both sides before replacing it.
+                self.summary["conflicts"] += 1
                 suffix = Path(name).suffix
                 conflict = sibling(name, f"{PurePosixPath(name).stem[:32]}.reader-conflict-{digest(remote)[:16]}{suffix}")
                 check_collisions(names | {conflict})
@@ -502,9 +541,11 @@ class Sync:
                     self.put_remote(name, local, remote)
                     self.remember(name, local)
             actions += 1
+        self.sync_tools(names)
         if self.math:
             self.sync_math(names)
         self.report(f"{'Preview' if self.dry_run else 'Sync'} complete: {actions} change(s), {len(names)} note(s).")
+        self.report("Summary: " + ", ".join(f"{value} {key}" for key, value in self.summary.items()))
         return actions
 
 
@@ -515,6 +556,8 @@ def main(argv=None):
     parser.add_argument("--reader-folder", default="/OneDriveNotes", help="Dedicated SD-card folder")
     parser.add_argument("--dry-run", action="store_true", help="Preview transfers without writing notes or history")
     parser.add_argument("--math", action="store_true", help="Render inline and display LaTeX maths using optional Python packages")
+    parser.add_argument("--math-size", type=int, choices=range(18, 41), default=26, metavar="18–40",
+                        help="Rendered maths/text size (default 26); changes refresh unchanged notes")
     parser.add_argument("--watch", action="store_true", help="Repeat until Ctrl+C; retry while reader is unavailable")
     parser.add_argument("--interval", type=int, default=60, help="Seconds between repeats (minimum 10)")
     args = parser.parse_args(argv)
@@ -538,7 +581,7 @@ def main(argv=None):
         with sync_lock(state_dir):
             while True:
                 try:
-                    Sync(folder, reader, state_dir, args.dry_run, math=args.math).run()
+                    Sync(folder, reader, state_dir, args.dry_run, math=args.math, math_size=args.math_size).run()
                 except (SyncError, OSError) as error:
                     if not args.watch:
                         raise

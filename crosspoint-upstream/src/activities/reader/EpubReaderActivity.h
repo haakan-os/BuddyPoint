@@ -49,6 +49,9 @@ class EpubReaderActivity final : public ReaderActivity {
   int idlePrewarmPage = -1;
   unsigned long lastRenderCompleteMs = 0;
   bool bookmarkRemoved = false;
+  StrId favouriteMessage = StrId::STR_FAVOURITE_ADDED;
+  bool showFavouriteMessage = false;
+  unsigned long favouriteMessageTime = 0;
   std::vector<BookmarkEntry> cachedBookmarks;
   bool recentsEntryRemoved = false;
   unsigned long bookmarkMessageTime = 0UL;

@@ -60,10 +60,14 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
   items.push_back({MenuAction::SCREENSHOT, StrId::STR_SCREENSHOT_BUTTON});
   items.push_back({MenuAction::DISPLAY_QR, StrId::STR_DISPLAY_QR});
   items.push_back({MenuAction::GO_HOME, StrId::STR_GO_HOME_BUTTON});
+  items.push_back({MenuAction::FAVOURITE, StrId::STR_TOGGLE_FAVOURITE});
   if (canSync)
     items.push_back({MenuAction::SYNC, StrId::STR_SYNC_PROGRESS});
-  else
+  else {
     items.push_back({MenuAction::CHECKLIST, StrId::STR_CHECKLIST});
+    items.push_back({MenuAction::NOTE_LINKS, StrId::STR_NOTE_LINKS});
+    items.push_back({MenuAction::NOTE_STUDY, StrId::STR_NOTE_STUDY});
+  }
   items.push_back({MenuAction::DELETE_CACHE, StrId::STR_DELETE_CACHE});
   items.push_back({MenuAction::TEXT_SETTINGS, StrId::STR_TEXT_SETTINGS});
 }

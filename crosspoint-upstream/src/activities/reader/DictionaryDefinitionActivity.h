@@ -17,11 +17,13 @@
 class DictionaryDefinitionActivity final : public Activity {
  public:
   explicit DictionaryDefinitionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string headword,
-                                        std::string definition, bool htmlDefinition = false)
+                                        std::string definition, bool htmlDefinition = false,
+                                        std::string reverseText = {})
       : Activity("DictionaryDefinition", renderer, mappedInput),
         headword(std::move(headword)),
         definition(std::move(definition)),
-        htmlDefinition(htmlDefinition) {}
+        htmlDefinition(htmlDefinition),
+        reverseText(std::move(reverseText)) {}
 
   void onEnter() override;
   void onExit() override;
@@ -53,6 +55,8 @@ class DictionaryDefinitionActivity final : public Activity {
   // separators) to newlines so C-string APIs see the whole text.
   std::string definition;
   const bool htmlDefinition;
+  std::string reverseText;
+  bool showingAnswer = false;
   // Styled path: reader-identical Pages laid out from the HTML definition.
   // Empty means the plain-text span path below is active.
   std::vector<std::unique_ptr<Page>> pages;
