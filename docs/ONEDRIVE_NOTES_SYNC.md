@@ -64,3 +64,61 @@ python3 -m unittest discover -s companion/notes-sync -v
 Automated tests cover recursive bidirectional edits, first-sync and nested conflicts, empty/Unicode notes, deletion behavior, preview mode, interrupted uploads, changes during transfer, nested recovery, local backups, unsafe paths and parent directory links, duplicate names, process locking, and real HTTP request formatting against a local server.
 
 Physical-device verification is still needed: upload a small note, open it on the X3, tick a checklist item, sync back, and confirm the changed file reaches OneDrive. Disconnect Wi-Fi during a test upload and rerun to check recovery on the real SD card.
+
+## Optional equation rendering (Python)
+
+The `--math` option prepares an offline reading copy of notes containing standalone
+`$$ ... $$` equations. It requires BuddyPoint v1.6.9 or newer. Older firmware still reads the original Markdown but shows the math source.
+
+Install the optional packages into the same Python environment used for syncing:
+
+```sh
+python -m pip install -r companion/notes-sync/requirements-math.txt
+python companion/notes-sync/buddy_notes_sync.py --folder "/path/to/OneDrive/Notes" --device haakanpoint.local --math
+```
+
+Keep any existing `--reader-folder`, `--watch` and other options. For example:
+
+```markdown
+# Quadratic formula
+
+$$
+x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
+$$
+
+Or a shorter equation on its own line:
+
+$$E = mc^2$$
+```
+
+This uses **Matplotlib MathText**, a Python renderer for a subset of LaTeX, rather
+than MathJax. No Node.js, browser, network rendering service, or system TeX
+installation is needed. Fractions, roots, Greek letters, sums, integrals,
+superscripts and subscripts are supported. Full LaTeX environments/macros such as
+`align` and matrices are not supported. Unsupported expressions are kept as text
+and reported during rendering. Inline `$...$` remains text in this first version.
+Dollar signs inside fenced or indented code are not rendered.
+
+Original `.md`/`.markdown` files are never rewritten by the renderer. Each rendered
+note gets a `buddy-math-<filename-hash>.bmath` file beside it **on the reader only**;
+this contains a source fingerprint and an EPUB reading copy with embedded grayscale
+PNG equations. These files do not appear as books or notes in the library. The
+reader checks the source and the entire reading copy before using it. Editing a
+checklist or note invalidates the copy immediately: reopen the note to use native
+Markdown until the next sync with `--math`. Sync again and reopen to see updated
+math. Reading position/pagination is reset when the reading copy changes.
+
+Notes without equations keep the native Markdown rendering. Math-enabled notes use
+CommonMark plus tables; external images still show their descriptions, links show
+labels, and raw HTML is displayed as text. Equation images have a fixed size and
+will not grow with the reader's text-size setting. Expressions are limited to
+4,096 characters, 128 rendered equations per note, and 8 MiB per reading copy.
+Generated copies are cached outside OneDrive in the sync history's `math` folder.
+Deleting that cache forces regeneration. Old reader sidecars are not automatically
+deleted (the sync tool does not propagate deletions); they are ignored if their
+source changes or disappears and may be removed manually.
+
+To check on hardware, sync a note with the example above, close BuddySync, and open
+it in the Markdown library tab. Confirm both equations display, ordinary headings
+and checklists still work, and a checklist edit falls back to Markdown until the
+next sync. A firmware build/host test cannot verify the physical screen rendering.

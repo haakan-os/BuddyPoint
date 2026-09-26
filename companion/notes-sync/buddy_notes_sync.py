@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Sync a computer's Markdown folder with BuddyPoint. Python 3.10+, no packages."""
+"""Sync a computer's Markdown folder with BuddyPoint. Python 3.10+; optional --math needs requirements-math.txt."""
 from __future__ import annotations
 
 import argparse
@@ -269,9 +269,10 @@ class Reader:
 
 
 class Sync:
-    def __init__(self, folder, reader, state_dir, dry_run=False, report=print):
+    def __init__(self, folder, reader, state_dir, dry_run=False, report=print, math=False):
         self.folder, self.reader, self.state_dir = folder.resolve(), reader, state_dir
         self.dry_run, self.report = dry_run, report
+        self.math = math
         self.pending_path = state_dir / "pending.json"
         self.state_path = state_dir / "state.json"
         self.identity = {"folder": str(folder), "reader": reader.address, "remote": reader.folder}
@@ -399,6 +400,41 @@ class Sync:
         self.archive(data)
         atomic_write(self.local_path(name), data)
 
+    def sync_math(self, names):
+        from buddy_math import MAGIC, render_note, sidecar_name
+        for name in sorted(names):
+            source = self.local(name)
+            if source is None or b"$$" not in source:
+                continue
+            if self.dry_run:
+                self.report(f"Preview equation rendering: {name}")
+                continue
+            if self.reader.read(name) != source:
+                self.report(f"Equation rendering deferred; note changed: {name}")
+                continue
+            key = digest(b"buddy-math-v1\0" + name.encode("utf-8") + b"\0" + source)
+            cache = self.state_dir / "math" / (key + ".bmath")
+            try:
+                bundle = cache.read_bytes() if cache.exists() else render_note(
+                    source, PurePosixPath(name).stem, lambda message: self.report(f"{name}: {message}"))
+            except ValueError as error:
+                self.report(f"Math skipped for {name}: {error}")
+                continue
+            if bundle is None:
+                continue
+            if len(bundle) > MAX_NOTE:
+                raise SyncError(f"Rendered note exceeds the 8 MiB limit: {name}")
+            if not cache.exists():
+                atomic_write(cache, bundle)
+            target = sidecar_name(name)
+            previous = self.reader.read(target)
+            if previous == bundle:
+                continue
+            if previous is not None and not previous.startswith(MAGIC):
+                raise SyncError(f"Refusing to replace an unrecognised math sidecar: {target}")
+            self.report(f"Upload equations: {name}")
+            self.put_remote(target, bundle, previous)
+
     def run(self):
         self.reader.status()
         self.reader.ensure_folder(self.dry_run)
@@ -450,6 +486,8 @@ class Sync:
                     self.put_remote(name, local, remote)
                     self.remember(name, local)
             actions += 1
+        if self.math:
+            self.sync_math(names)
         self.report(f"{'Preview' if self.dry_run else 'Sync'} complete: {actions} change(s), {len(names)} note(s).")
         return actions
 
@@ -460,6 +498,7 @@ def main(argv=None):
     parser.add_argument("--device", default="haakanpoint.local", help="Reader hostname or IP shown in BuddySync")
     parser.add_argument("--reader-folder", default="/OneDriveNotes", help="Dedicated SD-card folder")
     parser.add_argument("--dry-run", action="store_true", help="Preview transfers without writing notes or history")
+    parser.add_argument("--math", action="store_true", help="Render standalone $$ equations using optional Python packages")
     parser.add_argument("--watch", action="store_true", help="Repeat until Ctrl+C; retry while reader is unavailable")
     parser.add_argument("--interval", type=int, default=60, help="Seconds between repeats (minimum 10)")
     args = parser.parse_args(argv)
@@ -469,6 +508,12 @@ def main(argv=None):
             raise SyncError("Choose an existing notes folder.")
         if args.interval < 10:
             raise SyncError("Use an interval of at least 10 seconds.")
+        if args.math:
+            from buddy_math import dependencies
+            try:
+                dependencies()
+            except ValueError as error:
+                raise SyncError(str(error)) from error
         reader = Reader(args.device, args.reader_folder)
         # Keep history outside OneDrive so another computer cannot share stale baselines.
         folder_key = hashlib.sha256(str(folder).encode()).hexdigest()[:24]
@@ -477,7 +522,7 @@ def main(argv=None):
         with sync_lock(state_dir):
             while True:
                 try:
-                    Sync(folder, reader, state_dir, args.dry_run).run()
+                    Sync(folder, reader, state_dir, args.dry_run, math=args.math).run()
                 except (SyncError, OSError) as error:
                     if not args.watch:
                         raise

@@ -1,0 +1,4 @@
+# Optional: only needed for --math. No JavaScript or system TeX installation.
+matplotlib>=3.8,<4
+markdown-it-py>=3,<5
+Pillow>=10,<13

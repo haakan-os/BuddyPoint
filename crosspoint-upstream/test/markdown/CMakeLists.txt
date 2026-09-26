@@ -7,6 +7,7 @@ find_package(ZLIB REQUIRED)
 add_executable(MarkdownDocumentTest MarkdownDocumentTest.cpp ../../lib/Markdown/MarkdownDocument.cpp ../../lib/Markdown/MarkdownParser.cpp ../../lib/Markdown/StoredZipWriter.cpp)
 target_include_directories(MarkdownDocumentTest PRIVATE stubs ../../lib/Markdown ../../lib/Serialization ../../lib/Memory)
 target_link_libraries(MarkdownDocumentTest PRIVATE crosspoint_test_common GTest::gtest_main ZLIB::ZLIB expat)
+target_compile_definitions(MarkdownDocumentTest PRIVATE MARKDOWN_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 gtest_discover_tests(MarkdownDocumentTest)
 
 add_executable(MarkdownChecklistTest MarkdownChecklistTest.cpp ../../lib/Markdown/MarkdownChecklist.cpp)

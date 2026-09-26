@@ -13,7 +13,7 @@
 
 namespace markdown {
 namespace {
-constexpr uint32_t CONVERTER_VERSION = 1;
+constexpr uint32_t CONVERTER_VERSION = 2;
 constexpr char CONTAINER[] =
     "<?xml version=\"1.0\"?><container version=\"1.0\" "
     "xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\"><rootfiles><rootfile full-path=\"content.opf\" "
@@ -80,6 +80,54 @@ struct Builder {
       vTaskDelay(1);
     }
     return file.seek(0);
+  }
+  // Sidecar v1: magic[8], source size[4], source FNV[8], EPUB size[4], EPUB FNV[8], EPUB.
+  // Validate all bytes before selecting it; stale or interrupted syncs use native Markdown.
+  bool mathCopy(const std::string& sourcePath, const Fingerprint& source, HalFile& math, uint64_t& hash) {
+    const size_t slash = sourcePath.find_last_of('/');
+    const std::string_view name(sourcePath.data() + (slash == std::string::npos ? 0 : slash + 1),
+                                sourcePath.size() - (slash == std::string::npos ? 0 : slash + 1));
+    uint64_t nameHash = 14695981039346656037ULL;
+    for (const unsigned char c : name) nameHash = (nameHash ^ c) * 1099511628211ULL;
+    char filename[48];
+    std::snprintf(filename, sizeof(filename), "buddy-math-%016llx.bmath", static_cast<unsigned long long>(nameHash));
+    const std::string path = sourcePath.substr(0, slash == std::string::npos ? 0 : slash + 1) + filename;
+    if (!Storage.exists(path.c_str()) || !Storage.openFileForRead("MD", path, math) || math.size() < 36 ||
+        math.size() > 8 * 1024 * 1024 || math.read(buffer, 32) != 32 || std::memcmp(buffer, "BUDMATH1", 8) != 0)
+      return false;
+    auto integer = [this](size_t offset, size_t count) {
+      uint64_t value = 0;
+      for (size_t i = 0; i < count; ++i) value |= uint64_t(buffer[offset + i]) << (8 * i);
+      return value;
+    };
+    if (integer(8, 4) != source.size || integer(12, 8) != source.hash || integer(20, 4) != math.size() - 32)
+      return false;
+    const uint64_t expected = integer(24, 8);
+    hash = 14695981039346656037ULL;
+    size_t remaining = math.size() - 32;
+    bool first = true;
+    while (remaining) {
+      const size_t count = std::min(remaining, sizeof(buffer));
+      if (math.read(buffer, count) != static_cast<int>(count)) return false;
+      if (first && std::memcmp(buffer, "PK\x03\x04", 4) != 0) return false;
+      first = false;
+      for (size_t i = 0; i < count; ++i) hash = (hash ^ buffer[i]) * 1099511628211ULL;
+      remaining -= count;
+      vTaskDelay(1);
+    }
+    return hash == expected && math.seek(32);
+  }
+  bool copyMath(HalFile& math, const std::string& base) {
+    HalFile output;
+    if (!Storage.openFileForWrite("MD", base + ".epub.tmp", output)) return false;
+    size_t remaining = math.size() - 32;
+    while (remaining) {
+      const size_t count = std::min(remaining, sizeof(buffer));
+      if (math.read(buffer, count) != static_cast<int>(count) || output.write(buffer, count) != count) return false;
+      remaining -= count;
+      vTaskDelay(1);
+    }
+    return output.close();
   }
   bool convert(HalFile& source, HalFile& html, HalFile& toc, std::string_view title) {
     serialization::BufferedFileWriter content(html, 2048), navigation(toc, 2048);
@@ -170,6 +218,13 @@ bool prepareDocument(const std::string& sourcePath, std::string& archivePath) {
   if (!Storage.openFileForRead("MD", sourcePath, source)) return false;
   Fingerprint fingerprint;
   if (!builder->fingerprint(source, fingerprint)) return false;
+  HalFile math;
+  uint64_t mathHash = 0;
+  const bool hasMath = builder->mathCopy(sourcePath, fingerprint, math, mathHash);
+  if (hasMath) {
+    fingerprint.hash ^= mathHash;
+    fingerprint.version |= 0x80000000u;
+  }
   const auto key = std::to_string(std::hash<std::string>{}(sourcePath));
   const std::string directory = "/.crosspoint/md_" + key;
   const std::string base = directory + "/document";
@@ -188,7 +243,7 @@ bool prepareDocument(const std::string& sourcePath, std::string& archivePath) {
   std::string title = sourcePath.substr(slash == std::string::npos ? 0 : slash + 1);
   const size_t dot = title.find_last_of('.');
   if (dot != std::string::npos) title.resize(dot);
-  const bool built = build(*builder, source, base, title);
+  const bool built = hasMath ? builder->copyMath(math, base) : build(*builder, source, base, title);
   Storage.remove((base + ".html.tmp").c_str());
   Storage.remove((base + ".ncx.tmp").c_str());
   if (!built) {

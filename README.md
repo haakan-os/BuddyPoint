@@ -12,6 +12,7 @@ A CrossPoint-based firmware for the **Xteink X3**, with enhanced KOReader sync, 
 - **Notes and checklists:** send highlights and notes with BuddySync, and toggle Markdown tasks with the reader buttons. See the [setup guide](docs/NOTES_AND_CHECKLISTS.md).
 - **OneDrive notes:** a Python companion syncs a computer's OneDrive Markdown folder and subfolders with the reader, including checklist edits and conflict copies. See the [desktop sync guide](docs/ONEDRIVE_NOTES_SYNC.md).
 - **Markdown reading:** open `.md` and `.markdown` files from the SD card, with headings, lists, code blocks, and reading progress. See the [viewer guide](crosspoint-upstream/docs/markdown.md).
+- **Markdown maths:** optional Python `--math` sync renders standalone `$$...$$` equations for offline reading, keeping original notes intact. See the [math setup](docs/ONEDRIVE_NOTES_SYNC.md#optional-equation-rendering-python).
 - **Markdown library tab:** find notes separately from books, with search and alphabetical sorting. Opening the tab refreshes the index to pick up newly synced notes.
 - **OTA updates:** download stable releases from this BuddyPoint repository. See the [OTA guide](docs/OTA_UPDATES.md) for the one-time migration and release process.
 - **USB web flasher:** install the included firmware or a compatible application build, with device checks, real progress, and verification of the written data.
