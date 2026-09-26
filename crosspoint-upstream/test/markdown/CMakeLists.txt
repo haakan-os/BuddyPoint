@@ -1,0 +1,10 @@
+add_executable(MarkdownTest MarkdownTest.cpp ../../lib/Markdown/MarkdownParser.cpp ../../lib/Markdown/StoredZipWriter.cpp)
+target_include_directories(MarkdownTest PRIVATE ../../lib/Markdown)
+target_link_libraries(MarkdownTest PRIVATE crosspoint_test_common GTest::gtest_main)
+gtest_discover_tests(MarkdownTest)
+
+find_package(ZLIB REQUIRED)
+add_executable(MarkdownDocumentTest MarkdownDocumentTest.cpp ../../lib/Markdown/MarkdownDocument.cpp ../../lib/Markdown/MarkdownParser.cpp ../../lib/Markdown/StoredZipWriter.cpp)
+target_include_directories(MarkdownDocumentTest PRIVATE stubs ../../lib/Markdown ../../lib/Serialization ../../lib/Memory)
+target_link_libraries(MarkdownDocumentTest PRIVATE crosspoint_test_common GTest::gtest_main ZLIB::ZLIB expat)
+gtest_discover_tests(MarkdownDocumentTest)

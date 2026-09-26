@@ -1,0 +1,14 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+node_modules/
+.pio/
+/artifacts/
+/firmware/prebuilt/
+/koreader-plugin/*.zip
+.env
+.env.*
+*.local.ini
+/crosspoint-upstream/sdkconfig 2.default
+/crosspoint-upstream/sdkconfig 3.default

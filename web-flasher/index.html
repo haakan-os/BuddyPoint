@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BuddyPoint · Web Flasher</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="flasher.js"></script>
+</head>
+<body>
+  <main class="container">
+    <header class="header">
+      <span class="info-badge">Xteink X3 · ESP32-C3</span>
+      <h1>BuddyPoint Web Flasher</h1>
+      <p>A fresh chapter for your pocket reader.</p>
+    </header>
+    <div id="status" class="notice" role="status" aria-live="polite">Ready to connect.</div>
+    <noscript><p class="notice error">Enable JavaScript to use the USB flasher.</p></noscript>
+    <section class="card">
+      <h2>1. Connect your reader</h2>
+      <p>Use desktop Chrome or Edge and a USB-C data cable. Close any serial monitor or other flasher before connecting.</p>
+      <p>Select your reader’s USB serial port when prompted. If the connection fails, put the reader in download mode using its recovery instructions, then reconnect.</p>
+      <div class="button-row">
+        <button id="connectBtn" class="btn" disabled>Connect device</button>
+        <button id="disconnectBtn" class="btn secondary" disabled>Disconnect</button>
+      </div>
+    </section>
+    <section class="card">
+      <h2>2. Install BuddyPoint</h2>
+      <p>The included build has BuddySync, custom themes, Sudoku, and the Markdown viewer.</p>
+      <label class="choice"><input id="useCustom" type="checkbox"> Use my own application file</label>
+      <label for="firmwareFile" class="file-label">Optional X3/X4 <code>firmware.bin</code> from this project</label>
+      <input type="file" id="firmwareFile" accept=".bin" disabled>
+      <p class="fine-print">Installs the bootloader, partition table, and application, and resets the boot selection. The SD card is untouched. Custom files must use this project’s 16 MB partition layout; factory images are not accepted here.</p>
+      <div id="progress" class="progress-bar-container" role="progressbar" aria-label="Firmware installation" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="progressBar" class="progress-bar"></div>
+      </div>
+      <span id="progressText">0%</span>
+      <button id="flashBtn" class="btn btn-success" disabled>Install firmware</button>
+    </section>
+    <details class="card">
+      <summary>Connection and installation log</summary>
+      <pre id="logConsole" class="status-box"></pre>
+    </details>
+    <footer><a href="https://github.com/haakan-os/BuddyPoint">Source &amp; help</a> · Based on CrossPoint · <a href="vendor/NOTICE.txt">Flasher libraries</a></footer>
+  </main>
+</body>
+</html>
