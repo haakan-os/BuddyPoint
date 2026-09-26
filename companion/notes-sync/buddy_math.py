@@ -1,7 +1,9 @@
 """Optional, offline display-math rendering for BuddyPoint (no JavaScript or TeX)."""
 from html import escape
 from io import BytesIO
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
+import sys
+import shlex
 import struct
 import zipfile
 
@@ -32,8 +34,9 @@ def dependencies():
         from PIL import Image, ImageOps
         import numpy
     except ImportError as error:
-        raise ValueError("Math rendering needs the optional packages: python -m pip install -r "
-                         "companion/notes-sync/requirements-math.txt") from error
+        command = shlex.join([sys.executable, "-m", "pip", "install", "-r",
+                              str(Path(__file__).resolve().with_name("requirements-math.txt"))])
+        raise ValueError(f"Math rendering needs the optional packages. Run: {command}") from error
     return MarkdownIt, MathTextParser, FontProperties, Image, ImageOps, numpy
 
 

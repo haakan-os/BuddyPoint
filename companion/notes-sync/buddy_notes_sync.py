@@ -30,6 +30,10 @@ class SyncError(Exception):
     pass
 
 
+def progress(message):
+    print(message, flush=True)
+
+
 def digest(data):
     return hashlib.sha256(data).hexdigest() if data is not None else None
 
@@ -132,7 +136,7 @@ class NoRedirects(HTTPRedirectHandler):
 
 
 class Reader:
-    def __init__(self, address, folder="/OneDriveNotes", timeout=60):
+    def __init__(self, address, folder="/OneDriveNotes", timeout=60, report=progress):
         self.address = address.rstrip("/")
         if "://" not in self.address:
             self.address = "http://" + self.address
@@ -144,6 +148,7 @@ class Reader:
         self.folder = "/" + safe_name(folder.strip("/"))
         if self.folder.casefold() in {"/buddynotes", "/system", "/books", "/fonts"}:
             raise SyncError("Choose a dedicated notes folder, separate from KOReader exports and books.")
+        self.report = report
         self.timeout = timeout
         # LAN traffic must not be sent through an environment-configured proxy.
         self.opener = build_opener(ProxyHandler({}), NoRedirects())
@@ -164,7 +169,7 @@ class Reader:
                 return None
             raise SyncError(f"Reader returned HTTP {error.code} for {route}.") from error
         except (URLError, TimeoutError, OSError, HTTPException) as error:
-            raise SyncError(f"Cannot reach {self.address}. Open BuddySync on the reader. ({error})") from error
+            raise SyncError(f"Cannot reach {self.address} ({route}). Open BuddySync on the reader. ({error})") from error
 
     def listing(self, folder):
         try:
@@ -217,6 +222,7 @@ class Reader:
         while pending:
             relative = pending.pop()
             folder = self.folder + ("/" + relative if relative else "")
+            self.report(f"Scanning reader folder: {folder}")
             entries = self.listing(folder)
             entries_seen += len(entries)
             if entries_seen > MAX_ENTRIES:
@@ -269,7 +275,7 @@ class Reader:
 
 
 class Sync:
-    def __init__(self, folder, reader, state_dir, dry_run=False, report=print, math=False):
+    def __init__(self, folder, reader, state_dir, dry_run=False, report=progress, math=False):
         self.folder, self.reader, self.state_dir = folder.resolve(), reader, state_dir
         self.dry_run, self.report = dry_run, report
         self.math = math
@@ -297,6 +303,7 @@ class Sync:
         entries_seen = 0
         while pending:
             directory = pending.pop()
+            self.report(f"Scanning computer folder: {directory.relative_to(self.folder)}")
             children = list(directory.iterdir())
             entries_seen += len(children)
             if entries_seen > MAX_ENTRIES:
@@ -403,6 +410,7 @@ class Sync:
     def sync_math(self, names):
         from buddy_math import MAGIC, render_note, sidecar_name
         for name in sorted(names):
+            self.report(f"Checking equations: {name}")
             source = self.local(name)
             if source is None or b"$$" not in source:
                 continue
@@ -414,6 +422,7 @@ class Sync:
                 continue
             key = digest(b"buddy-math-v1\0" + name.encode("utf-8") + b"\0" + source)
             cache = self.state_dir / "math" / (key + ".bmath")
+            self.report(f"{'Using cached' if cache.exists() else 'Rendering'} equations: {name}")
             try:
                 bundle = cache.read_bytes() if cache.exists() else render_note(
                     source, PurePosixPath(name).stem, lambda message: self.report(f"{name}: {message}"))
@@ -436,15 +445,22 @@ class Sync:
             self.put_remote(target, bundle, previous)
 
     def run(self):
-        self.reader.status()
+        self.report(f"Connecting to reader: {self.reader.address}")
+        status = self.reader.status()
+        self.report(f"Connected: {status['device']} firmware {status['version']}")
+        self.report(f"Checking reader folder: {self.reader.folder}")
         self.reader.ensure_folder(self.dry_run)
+        self.report("Checking interrupted transfers...")
         self.recover()
+        self.report("Scanning computer notes...")
         local_names = self.local_notes()
+        self.report("Scanning reader notes...")
         remote_names = self.reader.notes()
         names = local_names | remote_names
         check_collisions(names)
         actions = 0
-        for name in sorted(names):
+        for index, name in enumerate(sorted(names), 1):
+            self.report(f"Comparing note {index}/{len(names)}: {name}")
             local, remote = self.local(name), self.reader.read(name)
             self.archive(local)
             self.archive(remote)
@@ -529,6 +545,7 @@ def main(argv=None):
                     print(f"Waiting: {error}", file=sys.stderr, flush=True)
                 if not args.watch:
                     break
+                progress(f"Next check in {args.interval} seconds. Press Ctrl+C to stop.")
                 time.sleep(args.interval)
         return 0
     except KeyboardInterrupt:
