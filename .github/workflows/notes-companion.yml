@@ -1,0 +1,21 @@
+name: Desktop notes sync
+on:
+  push:
+    branches: [main]
+    paths: ['companion/notes-sync/**', '.github/workflows/notes-companion.yml']
+  pull_request:
+    paths: ['companion/notes-sync/**', '.github/workflows/notes-companion.yml']
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - run: python -m unittest discover -s companion/notes-sync -v
