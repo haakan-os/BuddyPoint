@@ -7,6 +7,8 @@ import shlex
 import struct
 import zipfile
 
+# Bump when generated output changes so unchanged notes refresh on the next sync.
+RENDERER_VERSION = 2
 MAGIC = b"BUDMATH1"
 HEADER = struct.Struct("<8sIQIQ")
 MAX_BUNDLE = 8 * 1024 * 1024
@@ -105,10 +107,12 @@ def render_note(source, title, report=lambda message: None):
             image.thumbnail((420, 500))
             image = ImageOps.expand(image, border=6, fill=255)
             image = image.point(lambda pixel: 255 if pixel >= 160 else 0)
-            png = BytesIO()
-            image.save(png, format="PNG")  # 8-bit grayscale, supported by firmware.
-            name = f"math-{len(images)}.png"
-            images.append((name, png.getvalue()))
+            encoded = BytesIO()
+            # Baseline grayscale JPEG uses the reader's smaller (~20 KB) decoder.
+            # PNG needs ~44 KB plus headroom even for tiny monochrome equations.
+            image.save(encoded, format="JPEG", quality=100, progressive=False, optimize=False)
+            name = f"math-{len(images)}.jpg"
+            images.append((name, encoded.getvalue()))
             return f'<p><img src="{name}" alt="{escape(expression, quote=True)}" /></p>\n'
         except (ValueError, RuntimeError, OverflowError, RecursionError) as error:
             report(f"Equation kept as text: {str(error).strip()}")
@@ -129,7 +133,7 @@ def render_note(source, title, report=lambda message: None):
     xhtml = ('<?xml version="1.0" encoding="UTF-8"?>'
              '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>' + title +
              '</title></head><body>' + body + '</body></html>')
-    manifest = ''.join(f'<item id="math-{i}" href="{name}" media-type="image/png"/>'
+    manifest = ''.join(f'<item id="math-{i}" href="{name}" media-type="image/jpeg"/>'
                        for i, (name, _) in enumerate(images))
     opf = ('<?xml version="1.0" encoding="UTF-8"?>'
            '<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="id">'

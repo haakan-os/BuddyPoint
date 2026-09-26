@@ -102,7 +102,7 @@ Dollar signs inside fenced or indented code are not rendered.
 Original `.md`/`.markdown` files are never rewritten by the renderer. Each rendered
 note gets a `buddy-math-<filename-hash>.bmath` file beside it **on the reader only**;
 this contains a source fingerprint and an EPUB reading copy with embedded grayscale
-PNG equations. These files do not appear as books or notes in the library. The
+baseline JPEG equations (the JPEG decoder uses less reader memory than PNG). These files do not appear as books or notes in the library. The
 reader checks the source and the entire reading copy before using it. Editing a
 checklist or note invalidates the copy immediately: reopen the note to use native
 Markdown until the next sync with `--math`. Sync again and reopen to see updated
@@ -114,7 +114,7 @@ labels, and raw HTML is displayed as text. Equation images have a fixed size and
 will not grow with the reader's text-size setting. Expressions are limited to
 4,096 characters, 128 rendered equations per note, and 8 MiB per reading copy.
 Generated copies are cached outside OneDrive in the sync history's `math` folder.
-Deleting that cache forces regeneration. Old reader sidecars are not automatically
+Renderer updates automatically regenerate outdated copies, even when the note has not changed. Deleting that cache also forces regeneration. Old reader sidecars are not automatically
 deleted (the sync tool does not propagate deletions); they are ignored if their
 source changes or disappears and may be removed manually.
 

@@ -25,7 +25,10 @@ Write equations on their own lines using `$$ ... $$`. Try copying
 [examples/math.md](examples/math.md) into your notes folder. The tool renders
 common LaTeX maths with Matplotlib MathText, embeds images in a separate reading
 copy, and preserves the original Markdown for editing/checklists. It uses no
-JavaScript or system TeX installation. Inline maths and full LaTeX environments
+JavaScript or system TeX installation. Equation images use baseline grayscale JPEG
+to reduce decoding memory on the reader. After updating the companion, stop and
+restart any running watch command; outdated equation copies are regenerated
+automatically, even if you have not edited the notes. Inline maths and full LaTeX environments
 are not supported; unrecognised equations remain text.
 
 See the [complete guide](../../docs/ONEDRIVE_NOTES_SYNC.md) for setup, limits,

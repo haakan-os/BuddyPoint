@@ -408,7 +408,7 @@ class Sync:
         atomic_write(self.local_path(name), data)
 
     def sync_math(self, names):
-        from buddy_math import MAGIC, render_note, sidecar_name
+        from buddy_math import MAGIC, RENDERER_VERSION, render_note, sidecar_name
         for name in sorted(names):
             self.report(f"Checking equations: {name}")
             source = self.local(name)
@@ -420,7 +420,7 @@ class Sync:
             if self.reader.read(name) != source:
                 self.report(f"Equation rendering deferred; note changed: {name}")
                 continue
-            key = digest(b"buddy-math-v1\0" + name.encode("utf-8") + b"\0" + source)
+            key = digest(f"buddy-math-v{RENDERER_VERSION}\0".encode() + name.encode("utf-8") + b"\0" + source)
             cache = self.state_dir / "math" / (key + ".bmath")
             self.report(f"{'Using cached' if cache.exists() else 'Rendering'} equations: {name}")
             try:

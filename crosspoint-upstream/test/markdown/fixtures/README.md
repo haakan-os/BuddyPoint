@@ -1,14 +1,9 @@
-`math.bmath` is a reference reading copy generated from `math.md` using the Python
-companion's `buddy_math.render_note(source_bytes, "Equation")`. The firmware test
-opens it through the normal Markdown document path and checks its embedded PNG
-and EPUB contents. This catches drift between the Python and C++ file formats.
+`math.bmath` is a legacy v1 reading copy generated from `math.md` using the
+Python companion's original PNG renderer and the title `Equation`. Keep it as a
+backward-compatibility fixture; the current renderer produces baseline grayscale
+JPEG images to reduce decoding memory on the reader.
 
-To regenerate from the repository root after an intentional format change:
-
-```sh
-PYTHONPATH=companion/notes-sync python -c 'from pathlib import Path; from buddy_math import render_note; p = Path("crosspoint-upstream/test/markdown/fixtures"); (p / "math.bmath").write_bytes(render_note((p / "math.md").read_bytes(), "Equation"))'
-```
-
-The optional `requirements-math.txt` packages must be installed in that Python
-environment. Image bytes may vary between font/rendering versions; the tests
-check the container, source fingerprint and content rather than exact pixels.
+The firmware test opens this fixture through the normal Markdown document path
+and checks its embedded PNG and EPUB contents. Companion tests check the current
+JPEG output, its source fingerprint, and automatic regeneration of v1 copies.
+The binary sidecar format is unchanged.

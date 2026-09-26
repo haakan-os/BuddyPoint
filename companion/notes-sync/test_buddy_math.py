@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 
 from buddy_math import HEADER, MAGIC, fnv, render_note, sidecar_name
-from buddy_notes_sync import Sync, SyncError
+from buddy_notes_sync import Sync, SyncError, atomic_write, digest
 from test_buddy_notes_sync import FakeReader
 
 
@@ -20,7 +20,7 @@ class MathTests(unittest.TestCase):
         self.assertEqual((length, payload_hash), (len(payload), fnv(payload)))
         return bundle, zipfile.ZipFile(BytesIO(payload))
 
-    def test_equations_are_pngs_in_valid_epub_with_navigation(self):
+    def test_equations_are_baseline_grayscale_jpegs_in_valid_epub_with_navigation(self):
         from PIL import Image
         source = b'# Equations\n\n$$\nx = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}\n$$\n\n$$E=mc^2$$\n'
         bundle, book = self.book(source)
@@ -29,11 +29,17 @@ class MathTests(unittest.TestCase):
         for name in ("content.xhtml", "content.opf", "toc.ncx", "META-INF/container.xml"):
             ET.fromstring(book.read(name))
         self.assertIn(b"content.xhtml#heading-0", book.read("toc.ncx"))
-        for name in ("math-0.png", "math-1.png"):
+        for name in ("math-0.jpg", "math-1.jpg"):
             image = Image.open(BytesIO(book.read(name)))
             self.assertEqual(image.mode, "L")
             self.assertLessEqual(image.width, 432)
-            self.assertEqual(set(image.getdata()), {0, 255})
+            self.assertEqual(image.format, "JPEG")
+            self.assertFalse(image.info.get("progressive"))
+            self.assertFalse(image.info.get("progression"))
+            self.assertEqual(image.getextrema(), (0, 255))
+            pixels = list(image.getdata())
+            self.assertTrue(all(pixel <= 8 or pixel >= 247 for pixel in pixels))
+        self.assertIn(b'media-type="image/jpeg"', book.read("content.opf"))
         self.assertEqual(render_note(source, "Notes & equations"), bundle)
 
     def test_code_and_inline_math_and_unclosed_blocks_are_unchanged(self):
@@ -60,13 +66,13 @@ class MathTests(unittest.TestCase):
     def test_indented_lists_and_quotes(self):
         for source in (b'> $$x^2$$\n', b'- item\n\n  $$x^2$$\n'):
             _, book = self.book(source)
-            self.assertIn("math-0.png", book.namelist())
+            self.assertIn("math-0.jpg", book.namelist())
 
     def test_expression_limit_preserves_text(self):
         messages = []
         _, book = self.book(b'$$' + b'x' * 4097 + b'$$', messages)
         self.assertTrue(messages)
-        self.assertNotIn("math-0.png", book.namelist())
+        self.assertNotIn("math-0.jpg", book.namelist())
 
 
 class MathSyncTests(unittest.TestCase):
@@ -127,3 +133,22 @@ class MathSyncTests(unittest.TestCase):
         self.sync()
         for name in self.reader.notes():
             self.assertIn(sidecar_name(name), self.reader.files)
+
+    def test_old_renderer_cache_refreshes_unchanged_note_automatically(self):
+        self.sync()
+        target = sidecar_name(self.name)
+        # Model a v1 PNG bundle left on the reader and in the old local cache.
+        old_bundle = MAGIC + b"old generated PNG reading copy"
+        self.reader.files[target] = old_bundle
+        for cache in (self.history / "math").glob("*.bmath"):
+            cache.unlink()
+        old_key = digest(b"buddy-math-v1\0" + self.name.encode() + b"\0" + self.source)
+        atomic_write(self.history / "math" / (old_key + ".bmath"), old_bundle)
+        self.reader.writes.clear()
+        self.assertEqual(self.sync(), 0)  # Original note does not need a transfer.
+        updated = self.reader.files[target]
+        self.assertNotEqual(updated, old_bundle)
+        with zipfile.ZipFile(BytesIO(updated[32:])) as book:
+            self.assertIn("math-0.jpg", book.namelist())
+        self.assertEqual(self.reader.files[self.name], self.source)
+        self.assertTrue(any("Upload equations" in message for message in self.messages))
