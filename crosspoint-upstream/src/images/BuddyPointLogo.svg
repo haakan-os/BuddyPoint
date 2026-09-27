@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <title>Buddy Point — two reading buddies and an open book</title>
+  <rect width="120" height="120" fill="white"/>
+  <g fill="black">
+    <circle cx="38" cy="27" r="10"/>
+    <circle cx="82" cy="27" r="10"/>
+    <path d="M14 48 Q36 40 56 54 V103 Q36 90 14 96 Z"/>
+    <path d="M64 54 Q84 40 106 48 V96 Q84 90 64 103 Z"/>
+  </g>
+  <g fill="none" stroke="white" stroke-width="4" stroke-linecap="round">
+    <path d="M25 59 Q36 57 46 63 M25 72 Q36 70 46 76"/>
+    <path d="M74 63 Q84 57 95 59 M74 76 Q84 70 95 72"/>
+  </g>
+</svg>

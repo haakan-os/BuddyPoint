@@ -564,3 +564,6 @@ STR_NOTE_STUDY: "Flashcards"
 STR_NOTE_REVEAL: "Reveal"
 STR_NOTE_TOOLS_EMPTY: "Sync this note with links or Question :: Answer cards"
 STR_NOTE_QUESTION: "Question"
+
+STR_BUDDY_POINT: "Buddy Point"
+STR_BUDDY_POINT_SLEEPING: "Sleeping"

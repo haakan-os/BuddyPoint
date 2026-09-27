@@ -2,7 +2,7 @@
   "name": "BuddyPoint \u2014 notes sync, themes, Sudoku & Markdown checklists",
   "chip": "ESP32-C3",
   "flashSize": "16MB",
-  "builtAt": "2026-09-26T23:41:29.533269+00:00",
+  "builtAt": "2026-09-27T01:57:56.508944+00:00",
   "parts": [
     {
       "path": "bootloader.bin",
@@ -25,8 +25,8 @@
     {
       "path": "firmware.bin",
       "offset": 65536,
-      "size": 5589904,
-      "sha256": "17d7d26b68089f6d961f5bfdb1c6814e941ebe319b500db8b0f7fb84a7d657fd"
+      "size": 5590048,
+      "sha256": "a8beb868e4c1ff043caeadcc5850b4d616ffbe07db97591266ccba5c927d1433"
     }
   ]
 }
