@@ -61,6 +61,41 @@ assert(dofile(plugin_dir .. "_meta.lua").fullname == "BuddySync")
 plugin.settings_db = nil
 print("PASS: BuddySync branding and existing settings survive the rename")
 
+-- Exercise real shelf discovery before the transfer tests replace it with a stub.
+-- Shape follows KOReader frontend/readhistory.lua (hist, file, dim, select_enabled).
+local history = package.loaded["readhistory"]
+local docs = package.loaded["docsettings"]
+local opened = {}
+docs.open = function(_, path)
+    opened[#opened + 1] = path
+    return { data = { summary = { status = "reading" }, percent_finished = 0.25 } }
+end
+history.hist = {
+    { file = "/books/deleted.epub", dim = true, select_enabled = false },
+    { file = "/books/unavailable.txt", select_enabled = false },
+    { file = "/books/unsupported.pdf", select_enabled = true },
+    { text = "missing path" },
+    { file = "/books/recent.EPUB", text = "Recent book", time = 300, select_enabled = true },
+    { file = "/books/second.txt", time = 200, select_enabled = true },
+    { file = "/books/third.epub", time = 100, select_enabled = true },
+    { file = "/books/fourth.epub", time = 50, select_enabled = true },
+}
+history.history = {{ path = "/books/stale-alias.epub" }}
+local books = plugin:getCurrentlyReadingBooks(2)
+assert(#books == 2 and #opened == 2)
+assert(books[1].path == "/books/recent.EPUB" and books[1].title == "Recent book")
+assert(books[1].time == 300 and books[1].progress == 0.25)
+assert(books[2].path == "/books/second.txt" and books[2].title == "second.txt")
+assert(#plugin:getCurrentlyReadingBooks() == 3, "configured shelf limit must apply")
+history.hist = {}
+assert(#plugin:getCurrentlyReadingBooks() == 0, "empty current history must not use stale aliases")
+history.hist = nil
+assert(plugin:getCurrentlyReadingBooks()[1].path == "/books/stale-alias.epub")
+history.history = nil
+assert(#plugin:getCurrentlyReadingBooks() == 0)
+docs.open = nil
+print("PASS: shelf discovery uses current KOReader history fields, skips unavailable books, and preserves order/limits")
+
 local active = {{path = "/books/first.epub"}, {path = "/books/second.epub"}}
 plugin.ui = { document = { file = active[1].path } }
 plugin.settings = { optimize_epub = true, shelf_sync_limit = 5 }

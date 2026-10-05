@@ -68,11 +68,13 @@ end
 function BuddySyncPlugin:getCurrentlyReadingBooks(limit)
     limit = limit or self.settings.shelf_sync_limit or 5
     local active_books = {}
-    local history = ReadHistory.history or {}
+    -- KOReader exposes hist/file; retain the previous aliases for older integrations.
+    local history = ReadHistory.hist or ReadHistory.history or {}
     
     for _, item in ipairs(history) do
-        local path = item.path
-        if path and (path:lower():match("%.epub$") or path:lower():match("%.txt$")) then
+        local path = item.file or item.path
+        if type(path) == "string" and not item.dim and item.select_enabled ~= false
+                and (path:lower():match("%.epub$") or path:lower():match("%.txt$")) then
             local doc_settings = DocSettings:open(path)
             local status = "reading"
             local progress = 0
