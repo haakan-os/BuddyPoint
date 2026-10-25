@@ -276,3 +276,31 @@ TEST(Ao3, BadgeDistinguishesAllReadingStatesAndUnknownCompletion) {
   EXPECT_NE(badge.pixels, unfinished);
   EXPECT_NE(badge.pixels, unknown);
 }
+
+TEST(Ao3, CurrentLogoutLinksRecognizeReturnToWithoutMatchingOtherPathsOrHosts) {
+  for (const auto* url : {"/users/logout?return_to=%2Fusers%2FReader", "/users/logout?return_to=%2F&other=1",
+                          "https://archiveofourown.org/users/logout?return_to=%2F", "/users/sign_out#top"}) {
+    ao3::Parser p(ao3::Parser::Mode::Auth);
+    ASSERT_TRUE(feed(p, std::string("<a data-method='delete' href='") + url + "'>Log Out</a>"));
+    EXPECT_TRUE(p.signedIn) << url;
+    EXPECT_TRUE(p.authReady());
+  }
+  for (const auto* url : {"/users/logout_fake?return_to=/", "https://example.com/users/logout?return_to=/",
+                          "//example.com/users/logout", "/users/login?return_to=/users/logout"}) {
+    ao3::Parser p(ao3::Parser::Mode::Auth);
+    ASSERT_TRUE(feed(p, std::string("<a href='") + url + "'>Log Out</a>"));
+    EXPECT_FALSE(p.signedIn) << url;
+    EXPECT_FALSE(p.authReady());
+  }
+}
+TEST(Ao3, EarlyAuthenticationCompletionRequiresBothFormFieldsAndDoesNotApplyToWorks) {
+  ao3::Parser auth(ao3::Parser::Mode::Auth);
+  ASSERT_TRUE(feed(auth, "<input name='authenticity_token' value='csrf'>"));
+  EXPECT_FALSE(auth.authReady());
+  ASSERT_TRUE(feed(auth, "<input name='user[password]'>"));
+  EXPECT_TRUE(auth.authReady());
+  ao3::Parser work(ao3::Parser::Mode::Work, "123");
+  EXPECT_FALSE(feed(work, "<a href='/users/logout?return_to=%2F'>Log Out</a>"));
+  EXPECT_TRUE(work.signedIn);
+  EXPECT_FALSE(work.authReady());
+}

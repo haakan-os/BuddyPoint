@@ -1,4 +1,8 @@
 #pragma once
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -9,6 +13,7 @@
 
 using esp_err_t = int;
 constexpr int ESP_OK = 0;
+constexpr int ESP_ERR_HTTP_EAGAIN = 0x7007;
 constexpr int HTTP_EVENT_ON_HEADER = 1;
 constexpr int HTTP_METHOD_POST = 1;
 struct esp_http_client_event_t {
@@ -33,6 +38,9 @@ struct Response {
   bool complete = true;
   bool connect = true;
   bool headersComplete = true;
+  bool chunked = false, stallBody = false;
+  unsigned headerWaits = 0, readWaits = 0, readAdvanceMs = 0;
+  size_t chunkSize = 1024;
   Response(int status, std::string body, std::vector<std::pair<std::string, std::string>> headers = {},
            bool complete = true, bool connect = true)
       : status(status), body(std::move(body)), headers(std::move(headers)), complete(complete), connect(connect) {}
@@ -43,6 +51,9 @@ struct Request {
   int method = 0;
   bool tlsVerified = false, manualRedirect = false;
   unsigned long started = 0;
+  bool nonBlocking = false;
+  size_t bytesRead = 0, readCalls = 0, headerCalls = 0;
+  int readTimeout = -1;
 };
 inline std::deque<Response> responses;
 inline std::vector<Request> requests;
@@ -52,6 +63,7 @@ struct Http {
   esp_http_client_config_t config;
   Response response;
   size_t requestIndex, position = 0;
+  int socket = -1, peer = -1;
 };
 }  // namespace ao3test
 using esp_http_client_handle_t = ao3test::Http*;
@@ -64,10 +76,17 @@ inline auto esp_http_client_init(const esp_http_client_config_t* config) {
   request.started = ao3test::clock;
   ao3test::requests.push_back(std::move(request));
   auto* http = new ao3test::Http{*config, std::move(ao3test::responses.front()), ao3test::requests.size() - 1};
+  int sockets[2];
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets) == 0) {
+    http->socket = sockets[0];
+    http->peer = sockets[1];
+  }
   ao3test::responses.pop_front();
   return http;
 }
 inline int esp_http_client_cleanup(esp_http_client_handle_t h) {
+  if (h->socket >= 0) close(h->socket);
+  if (h->peer >= 0) close(h->peer);
   delete h;
   return ESP_OK;
 }
@@ -85,20 +104,44 @@ inline int esp_http_client_write(esp_http_client_handle_t h, const char* bytes, 
   return length;
 }
 inline int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h) {
+  ++ao3test::requests[h->requestIndex].headerCalls;
+  if (h->response.headerWaits) {
+    --h->response.headerWaits;
+    ao3test::clock += h->config.timeout_ms;
+    return -ESP_ERR_HTTP_EAGAIN;
+  }
   for (auto& [name, value] : h->response.headers) {
     esp_http_client_event_t event{HTTP_EVENT_ON_HEADER, h->config.user_data, name.data(), value.data()};
     h->config.event_handler(&event);
   }
-  return h->response.headersComplete ? static_cast<int64_t>(h->response.body.size()) : -1;
+  if (!h->response.headersComplete) return -1;
+  return h->response.chunked ? 0 : static_cast<int64_t>(h->response.body.size());
+}
+inline int esp_http_client_get_socket(esp_http_client_handle_t h) { return h->socket; }
+inline int esp_http_client_set_timeout_ms(esp_http_client_handle_t h, int timeout) {
+  h->config.timeout_ms = timeout;
+  return ESP_OK;
 }
 inline int esp_http_client_get_status_code(esp_http_client_handle_t h) { return h->response.status; }
 inline int esp_http_client_read(esp_http_client_handle_t h, char* out, int length) {
-  size_t size = std::min<size_t>(length, h->response.body.size() - h->position);
+  auto& request = ao3test::requests[h->requestIndex];
+  ++request.readCalls;
+  request.readTimeout = h->config.timeout_ms;
+  request.nonBlocking = (fcntl(h->socket, F_GETFL, 0) & O_NONBLOCK) != 0;
+  if (h->response.stallBody || h->response.readWaits) {
+    if (h->response.readWaits) --h->response.readWaits;
+    return -ESP_ERR_HTTP_EAGAIN;
+  }
+  ao3test::clock += h->response.readAdvanceMs;
+  size_t size = std::min({static_cast<size_t>(length), h->response.body.size() - h->position, h->response.chunkSize});
   std::memcpy(out, h->response.body.data() + h->position, size);
   h->position += size;
+  request.bytesRead += size;
   return static_cast<int>(size);
 }
-inline bool esp_http_client_is_complete_data_received(esp_http_client_handle_t h) { return h->response.complete; }
+inline bool esp_http_client_is_complete_data_received(esp_http_client_handle_t h) {
+  return h->response.complete && h->position == h->response.body.size();
+}
 inline unsigned long millis() { return ao3test::clock; }
 inline void delay(unsigned ms) { ao3test::clock += ms; }
 inline void configTime(long, int, const char*, const char*) {}

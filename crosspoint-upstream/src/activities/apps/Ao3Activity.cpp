@@ -31,6 +31,8 @@ const char* errorText(Ao3Client::Error error) {
       return tr(STR_AO3_MEMORY_ERROR);
     case Ao3Client::Error::Clock:
       return tr(STR_AO3_CLOCK_ERROR);
+    case Ao3Client::Error::Timeout:
+      return tr(STR_AO3_TIMEOUT);
     default:
       return tr(STR_AO3_NETWORK_ERROR);
   }
@@ -206,7 +208,7 @@ bool Ao3Activity::progress(void* context, size_t bytes, size_t total) {
                                  : std::to_string(bytes / 1024) + " KB";
       if (self->processed) self->progressText += " · " + std::to_string(self->processed) + " " + tr(STR_AO3_CHECKED);
     }
-    self->requestUpdate();
+    self->requestUpdate(true);
   }
   return !self->cancelled;
 }

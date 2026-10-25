@@ -507,3 +507,114 @@ TEST_F(Ao3ClientTest, LoginRetainsLongSessionCookiesThroughRotation) {
   EXPECT_EQ(restored.account(), "Reader");
 }
 }  // namespace
+
+TEST_F(Ao3ClientTest, LoginRecognizesCurrentAo3NavigationWithoutWaitingForPageTails) {
+  // AO3 users/sessions/_greeting.html.erb appends return_to to the logout URL.
+  const std::string form = "<input name='authenticity_token' value='csrf'><input name='user[password]'>";
+  ao3test::responses.push_back({200, form + std::string(10000, ' '), {}, false});
+  ao3test::responses.back().chunked = true;
+  ao3test::responses.push_back(
+      {302, "", {{"Location", "/users/Reader"}, {"Set-Cookie", "_session=authenticated; Path=/; Secure"}}});
+  ao3test::responses.push_back(
+      {200,
+       "<nav id='greeting'><a href='/users/logout?return_to=%2Fusers%2FReader' data-method='delete'>Log Out</a>" +
+           std::string(10000, ' '),
+       {},
+       false});
+  ao3test::responses.back().chunked = true;
+  ASSERT_TRUE(client.signIn("Reader", "password"));
+  ASSERT_EQ(ao3test::requests.size(), 3U);
+  EXPECT_LE(ao3test::requests[0].bytesRead, 1024U);
+  EXPECT_LE(ao3test::requests[2].bytesRead, 1024U);
+  Ao3Client restored;
+  ASSERT_TRUE(restored.loadSession());
+  EXPECT_EQ(restored.account(), "Reader");
+}
+TEST_F(Ao3ClientTest, ReturnedLoginFormIsStillRejectedAfterSuccessfulHttpResponse) {
+  const std::string form = "<input name='authenticity_token' value='csrf'><input name='user[password]'>";
+  ao3test::responses.push_back({200, form, {{"Set-Cookie", "_session=anonymous; Path=/"}}});
+  ao3test::responses.push_back({200, form});
+  EXPECT_FALSE(client.signIn("Reader", "wrong-password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::SignIn);
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, LogoutMarkerWithoutSessionCookieIsNotEnoughToSignIn) {
+  ao3test::responses.push_back({200, "<input name='authenticity_token' value='csrf'><input name='user[password]'>"});
+  ao3test::responses.push_back({200, "<a href='/users/logout?return_to=%2F'>Log Out</a>"});
+  EXPECT_FALSE(client.signIn("Reader", "password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::SignIn);
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, TemporaryHeaderAndChunkedBodyWaitsResumeTheSameRequest) {
+  ao3test::responses.push_back({200, epub()});
+  auto& response = ao3test::responses.back();
+  response.chunked = true;
+  response.headerWaits = 4;
+  response.readWaits = 8;
+  ASSERT_TRUE(client.download(work));
+  ASSERT_EQ(ao3test::requests.size(), 1U);
+  const auto& request = ao3test::requests[0];
+  EXPECT_TRUE(request.nonBlocking);
+  EXPECT_EQ(request.readTimeout, 0);
+  EXPECT_EQ(request.headerCalls, 5U);
+  EXPECT_GT(request.readCalls, 8U);
+  EXPECT_EQ(contents("/AO3/123.epub"), epub());
+}
+TEST_F(Ao3ClientTest, CancellationDuringBodyWaitKeepsExistingDownload) {
+  put("/AO3/123.epub", "old epub");
+  ao3test::responses.push_back({200, epub()});
+  ao3test::responses.back().stallBody = true;
+  client.setProgress(
+      [](void*, size_t, size_t) { return ao3test::requests.empty() || ao3test::requests.back().readCalls < 3; },
+      nullptr);
+  EXPECT_FALSE(client.download(work));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Cancelled);
+  EXPECT_EQ(ao3test::requests.size(), 1U);
+  EXPECT_EQ(contents("/AO3/123.epub"), "old epub");
+  EXPECT_FALSE(Storage.exists("/AO3/123.epub.part"));
+}
+TEST_F(Ao3ClientTest, CancellationDuringHeaderWaitMakesNoPostRequest) {
+  ao3test::responses.push_back({200, "ignored"});
+  ao3test::responses.back().headerWaits = 1000;
+  client.setProgress(
+      [](void*, size_t, size_t) { return ao3test::requests.empty() || ao3test::requests.back().headerCalls < 3; },
+      nullptr);
+  EXPECT_FALSE(client.signIn("Reader", "password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Cancelled);
+  ASSERT_EQ(ao3test::requests.size(), 1U);
+  EXPECT_EQ(ao3test::requests[0].method, 0);
+}
+TEST_F(Ao3ClientTest, EndlessHeaderWaitTimesOutWithoutRetryingLogin) {
+  ao3test::responses.push_back({200, "ignored"});
+  ao3test::responses.back().headerWaits = 1000;
+  EXPECT_FALSE(client.signIn("Reader", "password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Timeout);
+  EXPECT_EQ(ao3test::requests.size(), 1U);
+  EXPECT_LT(ao3test::clock, 32000U);
+}
+TEST_F(Ao3ClientTest, EndlessBodyWaitTimesOutWithoutReplacingTheDownload) {
+  put("/AO3/123.epub", "old epub");
+  ao3test::responses.push_back({200, epub()});
+  ao3test::responses.back().stallBody = true;
+  EXPECT_FALSE(client.download(work));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Timeout);
+  EXPECT_EQ(ao3test::requests.size(), 1U);
+  EXPECT_EQ(contents("/AO3/123.epub"), "old epub");
+  EXPECT_LT(ao3test::clock, 32000U);
+}
+TEST_F(Ao3ClientTest, ContinuousSlowHtmlCannotExtendTheResponseDeadlineForever) {
+  ao3test::responses.push_back({200, std::string(5000, ' ')});
+  ao3test::responses.back().chunkSize = 1;
+  ao3test::responses.back().readAdvanceMs = 1000;
+  EXPECT_FALSE(client.fetchWork("123", work));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Timeout);
+  EXPECT_LT(ao3test::clock, 122000U);
+}
+TEST_F(Ao3ClientTest, LargeDownloadsCanContinueBeyondHtmlDeadlineWhileMakingProgress) {
+  ao3test::responses.push_back({200, epub()});
+  ao3test::responses.back().chunkSize = 32;
+  ao3test::responses.back().readAdvanceMs = 15000;
+  ASSERT_TRUE(client.download(work));
+  EXPECT_GT(ao3test::clock, 120000U);
+  EXPECT_EQ(contents("/AO3/123.epub"), epub());
+}

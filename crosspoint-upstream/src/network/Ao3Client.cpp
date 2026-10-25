@@ -11,6 +11,7 @@
 #include <esp_crt_bundle.h>
 #include <esp_http_client.h>
 #include <esp_wifi.h>
+#include <fcntl.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -22,6 +23,8 @@ constexpr const char* SESSION_PATH = "/.crosspoint/ao3-session.json";
 constexpr const char* RECORDS_PATH = "/.crosspoint/ao3";
 constexpr size_t MAX_DOWNLOAD = 64 * 1024 * 1024;
 constexpr uint32_t REQUEST_GAP_MS = 2000;
+constexpr uint32_t RESPONSE_IDLE_MS = 30000;
+constexpr uint32_t HTML_RESPONSE_MS = 120000;
 
 bool smallDocument(const std::string& path, JsonDocument& doc, size_t limit) {
   if (!atomic_file::recover(path)) return false;
@@ -187,7 +190,28 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
       lastError = Error::Network;
       return false;
     }
-    const auto length = esp_http_client_fetch_headers(http);
+    // The HTTP timeout alone only bounds select(), not a partial TLS record's
+    // subsequent recv(). Make both layers yield during response reads.
+    const int socket = esp_http_client_get_socket(http);
+    const int flags = socket >= 0 ? fcntl(socket, F_GETFL, 0) : -1;
+    if (flags < 0 || fcntl(socket, F_SETFL, flags | O_NONBLOCK) < 0 ||
+        esp_http_client_set_timeout_ms(http, 250) != ESP_OK) {
+      LOG_ERR("AO3", "Could not enable cooperative response reads");
+      lastError = Error::Network;
+      return false;
+    }
+    const auto responseStart = millis();
+    int64_t length;
+    do {
+      if (!pulse()) return false;
+      if (millis() - responseStart >= RESPONSE_IDLE_MS) {
+        LOG_ERR("AO3", "Response header timeout");
+        lastError = Error::Timeout;
+        return false;
+      }
+      length = esp_http_client_fetch_headers(http);
+      if (length == -ESP_ERR_HTTP_EAGAIN) delay(10);
+    } while (length == -ESP_ERR_HTTP_EAGAIN);
     const int status = esp_http_client_get_status_code(http);
     LOG_INF("AO3", "Response headers: status %d, length %lld, heap %u", status, static_cast<long long>(length),
             ESP.getFreeHeap());
@@ -225,14 +249,29 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
       return false;
     }
     size_t received = 0;
+    auto lastData = millis();
+    // A zero poll timeout returns to the input/progress callback instead of
+    // repeatedly waiting to fill a 1 KB read across slow TLS/HTTP chunks.
+    esp_http_client_set_timeout_ms(http, 0);
     while (true) {
       if (!pulse(received, length > 0 ? length : 0)) return false;
+      if (millis() - lastData >= RESPONSE_IDLE_MS || (!file && millis() - responseStart >= HTML_RESPONSE_MS)) {
+        LOG_ERR("AO3", "Response body timeout after %u bytes", static_cast<unsigned>(received));
+        lastError = Error::Timeout;
+        return false;
+      }
       const int n = esp_http_client_read(http, reinterpret_cast<char*>(buffer.get()), 1024);
+      if (n == -ESP_ERR_HTTP_EAGAIN) {
+        delay(25);
+        continue;
+      }
       if (n < 0) {
+        LOG_ERR("AO3", "Response read failed: %d", n);
         lastError = Error::Network;
         return false;
       }
       if (n == 0) break;
+      lastData = millis();
       received += n;
       if (file) {
         if (received > MAX_DOWNLOAD || file->write(buffer.get(), n) != static_cast<size_t>(n)) {
@@ -242,6 +281,10 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
       } else if (parser && !parser->feed(buffer.get(), n)) {
         lastError = Error::Parse;
         return false;
+      }
+      if (parser && parser->authReady()) {
+        LOG_INF("AO3", "Authentication markers received after %u bytes", static_cast<unsigned>(received));
+        return true;
       }
     }
     if (!esp_http_client_is_complete_data_received(http) || received == 0) {

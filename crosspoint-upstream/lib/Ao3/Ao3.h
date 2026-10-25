@@ -68,6 +68,7 @@ class Parser {
   explicit Parser(Mode mode, std::string id = "");
   bool feed(const uint8_t* data, size_t size);
   bool finish();
+  bool authReady() const { return mode == Mode::Auth && (signedIn || (loginForm && !csrf.empty())); }
   Work work;
   std::vector<Work> works;
   std::string next;

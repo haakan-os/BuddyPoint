@@ -5,7 +5,19 @@
 
 class Ao3Client {
  public:
-  enum class Error { None, Network, SignIn, RateLimit, Missing, Parse, StorageError, Cancelled, Memory, Clock };
+  enum class Error {
+    None,
+    Network,
+    SignIn,
+    RateLimit,
+    Missing,
+    Parse,
+    StorageError,
+    Cancelled,
+    Memory,
+    Clock,
+    Timeout
+  };
   using Progress = bool (*)(void* context, size_t downloaded, size_t total);
   void setProgress(Progress callback, void* context) {
     progress = callback;

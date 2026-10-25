@@ -53,6 +53,11 @@ bool has(std::string_view tokens, std::string_view token) {
   }
   return false;
 }
+bool logoutLink(std::string_view url) {
+  if (trustedUrl(url)) url.remove_prefix(std::string_view(ORIGIN).size());
+  const auto path = url.substr(0, url.find_first_of("?#"));
+  return path == "/users/logout" || path == "/users/sign_out";
+}
 uint32_t number(std::string_view text) {
   uint64_t value = 0;
   for (char c : text) {
@@ -360,7 +365,7 @@ bool Cookies::update(std::string_view cookie) {
 Parser::Parser(Mode mode, std::string id) : mode(mode) {
   work.id = std::move(id);
   tag.reserve(2048);
-  text.reserve(1024);
+  if (mode != Mode::Auth) text.reserve(1024);
   if (mode == Mode::Listing) works.reserve(PAGE_SIZE);
 }
 void Parser::capture(Field value, const std::string& closing) {
@@ -463,7 +468,7 @@ void Parser::token() {
     else if (has(classes, "summary"))
       summaryDepth = 1;
   }
-  if (!row && (href == "/users/logout" || href == "/users/sign_out" || attr(raw, "action") == "/users/logout"))
+  if (!row && ((name == "a" && logoutLink(href)) || (name == "form" && logoutLink(attr(raw, "action")))))
     signedIn = true;
   if (name == "input" && attr(raw, "name") == "authenticity_token") csrf = attr(raw, "value").substr(0, 512);
   if (name == "input" && attr(raw, "name") == "user[password]") loginForm = true;
