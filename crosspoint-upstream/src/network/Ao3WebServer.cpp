@@ -93,6 +93,8 @@ const char* errorName(Ao3Client::Error error) {
       return "Could not set the clock for secure AO3 access.";
     case Ao3Client::Error::Timeout:
       return "AO3 took too long to respond. Try again later.";
+    case Ao3Client::Error::Server:
+      return "AO3 returned a server error. Try again later.";
     case Ao3Client::Error::Parse:
       return "AO3 returned an unexpected response or exceeded a page limit.";
     default:

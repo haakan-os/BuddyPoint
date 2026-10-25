@@ -16,7 +16,8 @@ class Ao3Client {
     Cancelled,
     Memory,
     Clock,
-    Timeout
+    Timeout,
+    Server
   };
   using Progress = bool (*)(void* context, size_t downloaded, size_t total);
   void setProgress(Progress callback, void* context) {

@@ -68,6 +68,16 @@ struct Headers {
   ao3::Cookies* cookies;
   std::string location;
   bool invalidCookie = false;
+  char server[32]{};
+  char requestId[40]{};
+  static void copyDiagnostic(char* out, size_t capacity, const char* value) {
+    size_t i = 0;
+    for (; i + 1 < capacity && value[i]; ++i) {
+      const auto c = static_cast<unsigned char>(value[i]);
+      out[i] = c >= 32 && c < 127 ? static_cast<char>(c) : '?';
+    }
+    out[i] = '\0';
+  }
   static esp_err_t event(esp_http_client_event_t* event) {
     if (event->event_id != HTTP_EVENT_ON_HEADER) return ESP_OK;
     auto* self = static_cast<Headers*>(event->user_data);
@@ -75,6 +85,10 @@ struct Headers {
       if (!self->cookies->update(event->header_value)) self->invalidCookie = true;
     } else if (!strcasecmp(event->header_key, "Location")) {
       if (std::strlen(event->header_value) <= 2048) self->location = event->header_value;
+    } else if (!strcasecmp(event->header_key, "Server")) {
+      copyDiagnostic(self->server, sizeof(self->server), event->header_value);
+    } else if (!strcasecmp(event->header_key, "CF-Ray")) {
+      copyDiagnostic(self->requestId, sizeof(self->requestId), event->header_value);
     }
     return ESP_OK;
   }
@@ -131,11 +145,14 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
     }
   }
   WifiPower power;
+  bool retriedUpstreamTls = false;
+  uint32_t requestGap = REQUEST_GAP_MS;
   for (unsigned hop = 0; hop < 6; ++hop) {
-    while (lastRequest && millis() - lastRequest < REQUEST_GAP_MS) {
+    while (lastRequest && millis() - lastRequest < requestGap) {
       if (!pulse()) return false;
       delay(25);
     }
+    requestGap = REQUEST_GAP_MS;
     if (!pulse()) return false;
     if (ESP.getFreeHeap() < 55000 || ESP.getMaxAllocHeap() < 22000) {
       lastError = Error::Memory;
@@ -181,7 +198,10 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
             ESP.getFreeHeap(), ESP.getMaxAllocHeap());
     const auto opened = esp_http_client_open(http, post ? post->size() : 0);
     if (opened != ESP_OK) {
-      LOG_ERR("AO3", "Connection failed: %d", opened);
+      int tlsError = 0, verifyFlags = 0;
+      const auto tlsResult = esp_http_client_get_and_clear_last_tls_error(http, &tlsError, &verifyFlags);
+      LOG_ERR("AO3", "Connection failed: %d; TLS result %d, error %d, verify flags 0x%x", opened, tlsResult, tlsError,
+              static_cast<unsigned>(verifyFlags));
       lastError = Error::Network;
       return false;
     }
@@ -238,9 +258,20 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
       continue;
     }
     if (status != 200) {
+      if (status >= 500 && status <= 599)
+        LOG_ERR("AO3", "Server error %d: server=%s request-id=%s", status, headers.server, headers.requestId);
+      if (status == 525 && !post && !retriedUpstreamTls && hop + 1 < 6) {
+        LOG_INF("AO3", "Server returned 525; retrying GET once in 5 seconds");
+        retriedUpstreamTls = true;
+        lastRequest = millis();
+        requestGap = 5000;
+        // Leaving this scope closes TLS before the cancellable retry wait.
+        continue;
+      }
       lastError = status == 429                    ? Error::RateLimit
                   : status == 404                  ? Error::Missing
                   : status == 401 || status == 403 ? Error::SignIn
+                  : status >= 500 && status <= 599 ? Error::Server
                                                    : Error::Network;
       return false;
     }

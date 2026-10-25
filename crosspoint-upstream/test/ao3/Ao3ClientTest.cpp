@@ -618,3 +618,85 @@ TEST_F(Ao3ClientTest, LargeDownloadsCanContinueBeyondHtmlDeadlineWhileMakingProg
   EXPECT_GT(ao3test::clock, 120000U);
   EXPECT_EQ(contents("/AO3/123.epub"), epub());
 }
+
+TEST_F(Ao3ClientTest, LoginPageRetriesOne525BeforeSendingCredentials) {
+  ao3test::responses.push_back({525, "TLS handshake failed", {{"Server", "cloudflare"}, {"CF-Ray", "example-BNE"}}});
+  login();
+  ASSERT_EQ(ao3test::requests.size(), 4U);
+  EXPECT_EQ(ao3test::requests[0].method, 0);
+  EXPECT_EQ(ao3test::requests[1].method, 0);
+  EXPECT_GE(ao3test::requests[1].started - ao3test::requests[0].started, 5000U);
+  EXPECT_TRUE(ao3test::requests[0].body.empty());
+  EXPECT_TRUE(ao3test::requests[1].body.empty());
+  EXPECT_EQ(ao3test::requests[2].method, HTTP_METHOD_POST);
+  EXPECT_TRUE(client.signedIn());
+}
+TEST_F(Ao3ClientTest, Persistent525StopsAfterOneRetryWithoutSendingCredentials) {
+  ao3test::responses.push_back({525, "TLS handshake failed"});
+  ao3test::responses.push_back({525, "TLS handshake failed"});
+  EXPECT_FALSE(client.signIn("Reader", "password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Server);
+  ASSERT_EQ(ao3test::requests.size(), 2U);
+  for (const auto& request : ao3test::requests) {
+    EXPECT_EQ(request.method, 0);
+    EXPECT_TRUE(request.body.empty());
+  }
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, LoginPostIsNotRepeatedOn525) {
+  ao3test::responses.push_back({200, "<input name='authenticity_token' value='csrf'><input name='user[password]'>"});
+  ao3test::responses.push_back({525, "TLS handshake failed"});
+  EXPECT_FALSE(client.signIn("Reader", "password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Server);
+  ASSERT_EQ(ao3test::requests.size(), 2U);
+  EXPECT_EQ(ao3test::requests[1].method, HTTP_METHOD_POST);
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, CancelDuring525BackoffPreventsTheRetry) {
+  ao3test::responses.push_back({525, "TLS handshake failed"});
+  client.setProgress(
+      [](void*, size_t, size_t) {
+        return ao3test::requests.empty() || ao3test::clock < ao3test::requests.back().started + 500;
+      },
+      nullptr);
+  EXPECT_FALSE(client.signIn("Reader", "password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Cancelled);
+  EXPECT_EQ(ao3test::requests.size(), 1U);
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, OtherServerErrorsAreIdentifiedWithoutAutomaticRetry) {
+  for (const int status : {500, 502, 503, 504, 526}) {
+    const auto count = ao3test::requests.size();
+    ao3test::responses.push_back({status, "Server error"});
+    EXPECT_FALSE(client.fetchWork("123", work));
+    EXPECT_EQ(client.error(), Ao3Client::Error::Server);
+    EXPECT_EQ(ao3test::requests.size(), count + 1);
+  }
+}
+TEST_F(Ao3ClientTest, ServerFailureStopsBookmarkSyncBeforeTheNextWork) {
+  login();
+  Ao3WebJobs jobs;
+  ao3test::responses.push_back(
+      {200,
+       "<a href='/users/logout?return_to=/'>Log Out</a><ol class='bookmark index'>"
+       "<li class='bookmark blurb'><h4 class='heading'><a href='/works/123'>One</a></h4></li>"
+       "<li class='bookmark blurb'><h4 class='heading'><a href='/works/456'>Two</a></h4></li></ol>"});
+  ao3test::responses.push_back({525, "Server error"});
+  ao3test::responses.push_back({525, "Server error"});
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Bookmarks));
+  for (int i = 0; i < 5 && jobs.busy(); ++i) jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_EQ(jobs.status().error, Ao3Client::Error::Server);
+  EXPECT_EQ(jobs.status().checked, 1U);
+  EXPECT_EQ(jobs.status().failed, 1U);
+}
+
+TEST_F(Ao3ClientTest, ConnectionFailureDoesNotRetryOrDisableCertificateVerification) {
+  ao3test::responses.push_back({200, "", {}, true, false});
+  EXPECT_FALSE(client.signIn("Reader", "password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Network);
+  ASSERT_EQ(ao3test::requests.size(), 1U);
+  EXPECT_TRUE(ao3test::requests[0].tlsVerified);
+  EXPECT_TRUE(ao3test::requests[0].body.empty());
+  EXPECT_FALSE(Storage.exists(SESSION));
+}

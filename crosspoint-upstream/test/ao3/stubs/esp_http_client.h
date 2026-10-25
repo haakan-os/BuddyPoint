@@ -99,6 +99,11 @@ inline int esp_http_client_set_method(esp_http_client_handle_t h, int method) {
   return ESP_OK;
 }
 inline int esp_http_client_open(esp_http_client_handle_t h, int) { return h->response.connect ? ESP_OK : -1; }
+inline int esp_http_client_get_and_clear_last_tls_error(esp_http_client_handle_t, int* error, int* flags) {
+  *error = 0;
+  *flags = 0;
+  return ESP_OK;
+}
 inline int esp_http_client_write(esp_http_client_handle_t h, const char* bytes, int length) {
   ao3test::requests[h->requestIndex].body.append(bytes, length);
   return length;

@@ -125,7 +125,7 @@ void Ao3WebJobs::process(const std::string& id) {
   prior = {};
   if (!ok && (error == Ao3Client::Error::SignIn || error == Ao3Client::Error::RateLimit ||
               error == Ao3Client::Error::Cancelled || error == Ao3Client::Error::Memory ||
-              error == Ao3Client::Error::StorageError))
+              error == Ao3Client::Error::StorageError || error == Ao3Client::Error::Server))
     finish(error);
 }
 void Ao3WebJobs::tick() {

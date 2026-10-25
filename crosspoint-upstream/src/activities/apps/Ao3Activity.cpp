@@ -33,6 +33,8 @@ const char* errorText(Ao3Client::Error error) {
       return tr(STR_AO3_CLOCK_ERROR);
     case Ao3Client::Error::Timeout:
       return tr(STR_AO3_TIMEOUT);
+    case Ao3Client::Error::Server:
+      return tr(STR_AO3_SERVER_ERROR);
     default:
       return tr(STR_AO3_NETWORK_ERROR);
   }
@@ -515,7 +517,7 @@ void Ao3Activity::sync(bool bookmarks) {
       if (!client.fetchWork(item.id, remote)) {
         ++failed;
         if (client.error() == Ao3Client::Error::RateLimit || client.error() == Ao3Client::Error::SignIn ||
-            client.error() == Ao3Client::Error::Cancelled) {
+            client.error() == Ao3Client::Error::Cancelled || client.error() == Ao3Client::Error::Server) {
           stop = true;
           break;
         }
@@ -526,7 +528,7 @@ void Ao3Activity::sync(bool bookmarks) {
       else {
         ++failed;
         if (client.error() == Ao3Client::Error::RateLimit || client.error() == Ao3Client::Error::SignIn ||
-            client.error() == Ao3Client::Error::Cancelled) {
+            client.error() == Ao3Client::Error::Cancelled || client.error() == Ao3Client::Error::Server) {
           stop = true;
           break;
         }
