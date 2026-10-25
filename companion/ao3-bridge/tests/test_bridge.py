@@ -118,6 +118,13 @@ class Ao3Test(unittest.TestCase):
         self.assertEqual(item["words"], 1234)
         self.assertIsNone(metadata(BeautifulSoup(blurb(123).replace('/works/', '/series/'), "html.parser")))
 
+    def test_work_title_and_byline_ignore_related_work_headings(self):
+        soup = BeautifulSoup('<h2 class="title heading">Actual work</h2><h3 class="byline"><a rel="author">Actual author</a></h3>' + blurb(999), "html.parser")
+        work = metadata(soup, "123")
+        self.assertEqual(work["title"], "Actual work")
+        self.assertEqual(work["author"], "Actual author")
+        self.assertEqual(work["id"], "123")
+
     def test_private_bookmarks_have_small_cached_reader_pages(self):
         with tempfile.TemporaryDirectory() as directory:
             client = Ao3(directory)

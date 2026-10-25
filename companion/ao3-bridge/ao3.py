@@ -51,8 +51,8 @@ def signed_in(soup):
 
 
 def metadata(node, identifier=None):
-    heading = node.select_one("h4.heading") or node.select_one("h2.title")
-    link = heading.select_one('a[href^="/works/"]') if heading else None
+    heading = node.select_one("h2.title") if identifier else node.select_one("h4.heading")
+    link = heading.select_one('a[href^="/works/"]') if heading and identifier is None else None
     if identifier is None:
         match = re.fullmatch(r"/works/([1-9][0-9]{0,11})", urlsplit(link.get("href", "")).path) if link else None
         if not match:
@@ -63,7 +63,7 @@ def metadata(node, identifier=None):
                      if urlsplit(a["href"]).path.endswith(".epub")), "")
     return {
         "id": work_id(identifier), "title": text(link or heading),
-        "author": ", ".join(text(a) for a in node.select('a[rel~=author]'))[:192],
+        "author": ", ".join(text(a) for a in (node.select('.byline a[rel~=author]') or (heading.select('a[rel~=author]') if heading else [])))[:192],
         "summary": text(node.select_one("blockquote.summary, .summary blockquote"), 384),
         "fandom": text(node.select_one("h5.fandoms, dd.fandom")),
         "rating": text(node.select_one("dd.rating, .rating"), 80),
