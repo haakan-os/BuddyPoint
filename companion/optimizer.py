@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """
-HaakanPoint EPUB Optimizer
-Pre-processes EPUB files for optimal rendering and minimal RAM usage on the Xteink X3 (ESP32-C3).
-- Resizes & compresses images to 480x800 native resolution.
-- Applies Floyd-Steinberg 4-level grayscale dithering.
-- Strips bloat scripts/fonts.
-- Generates KOReader-compatible MD5 checksum.
+BuddyPoint EPUB Optimizer
+Bounds and validates EPUB archives, resizes PNG/JPEG images to 480x800, and
+applies four-level grayscale dithering while retaining each image's format.
+Chapter content, identifiers, metadata, navigation and author notes are preserved.
 """
 
 import sys
@@ -13,7 +11,6 @@ import os
 import zipfile
 import hashlib
 import tempfile
-import shutil
 import argparse
 from io import BytesIO
 
@@ -33,76 +30,109 @@ def compute_md5(filepath):
             hasher.update(chunk)
     return hasher.hexdigest()
 
+OPTIMIZER_VERSION = "x3-images-v1"
+MAX_ARCHIVE = 64 * 1024 * 1024
+MAX_EXPANDED = 128 * 1024 * 1024
+
+
+def validate_epub(path):
+    """Validate bounded ZIP/package structure without extracting untrusted paths."""
+    import posixpath
+    import xml.etree.ElementTree as ET
+    if os.path.getsize(path) > MAX_ARCHIVE:
+        raise ValueError("EPUB exceeds 64 MiB")
+    with zipfile.ZipFile(path) as archive:
+        entries = archive.infolist()
+        names = [entry.filename for entry in entries]
+        if len(entries) > 10000 or len(names) != len(set(names)):
+            raise ValueError("Invalid EPUB entry count or duplicate paths")
+        if sum(entry.file_size for entry in entries) > MAX_EXPANDED:
+            raise ValueError("Expanded EPUB exceeds 128 MiB")
+        for entry in entries:
+            name = entry.filename
+            if (name.startswith("/") or "\\" in name or ".." in name.split("/")
+                    or entry.flag_bits & 1 or entry.file_size > 32 * 1024 * 1024):
+                raise ValueError("Unsafe or oversized EPUB entry")
+        if archive.read("mimetype") != b"application/epub+zip":
+            raise ValueError("Not an EPUB")
+        def xml(name):
+            if archive.getinfo(name).file_size > 2 * 1024 * 1024:
+                raise ValueError("Oversized EPUB package XML")
+            raw = archive.read(name)
+            if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
+                raise ValueError("EPUB package XML declarations are not supported")
+            return ET.fromstring(raw)
+        container = xml("META-INF/container.xml")
+        rootfile = container.find(".//{*}rootfile")
+        if rootfile is None:
+            raise ValueError("Missing EPUB package")
+        opf = rootfile.attrib.get("full-path", "")
+        package = xml(opf)
+        manifest = {e.attrib.get("id"): e.attrib.get("href", "") for e in package.findall(".//{*}manifest/{*}item")}
+        spine = package.findall(".//{*}spine/{*}itemref")
+        if not spine:
+            raise ValueError("EPUB has no reading order")
+        from urllib.parse import unquote
+        for item in spine:
+            href = manifest.get(item.attrib.get("idref"), "")
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(opf), unquote(href.split("#")[0])))
+            if not href or target not in names:
+                raise ValueError("Missing EPUB chapter")
+        if archive.testzip() is not None:
+            raise ValueError("Corrupt EPUB entry")
+
+
 def dither_image_4level(image_bytes):
-    """Resizes and converts image to 4-level grayscale with Floyd-Steinberg dithering."""
+    """Keep the original PNG/JPEG format and names; leave other assets intact."""
     if not HAS_PIL:
         return image_bytes
-    
-    try:
-        img = Image.open(BytesIO(image_bytes)).convert("L")
-        img.thumbnail((TARGET_WIDTH, TARGET_HEIGHT), Image.Resampling.LANCZOS)
-        
-        # 4-level grayscale palette (0, 85, 170, 255)
-        palette = [0, 85, 170, 255]
-        # Quantize using Floyd-Steinberg dither
-        pal_img = Image.new("P", (1, 1))
-        pal_img.putpalette([0,0,0, 85,85,85, 170,170,170, 255,255,255] + [0]*756)
-        
-        dithered = img.quantize(palette=pal_img, dither=Image.Dither.FLOYDSTEINBERG)
-        
-        out_io = BytesIO()
-        dithered.convert("L").save(out_io, format="JPEG", quality=75, optimize=True)
-        return out_io.getvalue()
-    except Exception as e:
-        print(f"  [!] Warning: Image optimization skipped: {e}")
-        return image_bytes
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        try:
+            with Image.open(BytesIO(image_bytes)) as original:
+                fmt = original.format
+                if fmt not in ("PNG", "JPEG") or original.width * original.height > 16000000:
+                    return image_bytes
+                image = original.convert("RGBA")
+                background = Image.new("RGBA", image.size, "white")
+                background.alpha_composite(image)
+                image = background.convert("RGB")
+                image.thumbnail((TARGET_WIDTH, TARGET_HEIGHT), Image.Resampling.LANCZOS)
+                palette = Image.new("P", (1, 1))
+                palette.putpalette([v for i in range(256) for v in ([0, 85, 170, 255][i % 4],) * 3])
+                image = image.convert("L").convert("RGB").quantize(
+                    palette=palette, dither=Image.Dither.FLOYDSTEINBERG).convert("L")
+                output = BytesIO()
+                image.save(output, format=fmt, **({"quality": 85, "optimize": True} if fmt == "JPEG" else {"optimize": True}))
+                return output.getvalue()
+        except (OSError, ValueError, Image.DecompressionBombWarning, Image.DecompressionBombError):
+            return image_bytes
+
 
 def optimize_epub(input_path, output_path):
-    print(f"[*] Optimizing: {os.path.basename(input_path)}")
-    orig_size = os.path.getsize(input_path)
-    
-    temp_dir = tempfile.mkdtemp(prefix="haakanpoint_")
+    """Preserve package, chapter IDs, navigation and notes byte-for-byte."""
+    validate_epub(input_path)
+    output_path = os.path.abspath(output_path)
+    fd, temporary = tempfile.mkstemp(prefix=".epub-", dir=os.path.dirname(output_path))
+    os.close(fd)
     try:
-        with zipfile.ZipFile(input_path, 'r') as zin:
-            zin.extractall(temp_dir)
-            
-        # Traverse and optimize all image assets
-        image_extensions = ('.jpg', '.jpeg', '.png', '.webp', '.gif')
-        images_optimized = 0
-        
-        for root, _, files in os.walk(temp_dir):
-            for file in files:
-                ext = os.path.splitext(file)[1].lower()
-                if ext in image_extensions:
-                    img_path = os.path.join(root, file)
-                    with open(img_path, 'rb') as f:
-                        raw_data = f.read()
-                    
-                    optimized_data = dither_image_4level(raw_data)
-                    with open(img_path, 'wb') as f:
-                        f.write(optimized_data)
-                    images_optimized += 1
-        
-        # Repackage EPUB
-        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zout:
-            for root, _, files in os.walk(temp_dir):
-                for file in files:
-                    full_p = os.path.join(root, file)
-                    rel_p = os.path.relpath(full_p, temp_dir)
-                    zout.write(full_p, rel_p)
-                    
-        new_size = os.path.getsize(output_path)
-        md5 = compute_md5(output_path)
-        reduction = (1.0 - (new_size / orig_size)) * 100.0 if orig_size > 0 else 0
-        
-        print(f"  [+] Images processed: {images_optimized}")
-        print(f"  [+] Original Size:    {orig_size / 1024:.1f} KB")
-        print(f"  [+] Optimized Size:   {new_size / 1024:.1f} KB ({reduction:.1f}% reduction)")
-        print(f"  [+] KOSync MD5 Hash:  {md5}")
-        print(f"  [✓] Output saved to:  {output_path}")
+        with zipfile.ZipFile(input_path) as source, zipfile.ZipFile(temporary, "w") as dest:
+            dest.writestr("mimetype", b"application/epub+zip", compress_type=zipfile.ZIP_STORED)
+            for entry in source.infolist():
+                if entry.filename == "mimetype":
+                    continue
+                data = source.read(entry)
+                if entry.filename.lower().endswith((".png", ".jpg", ".jpeg")):
+                    data = dither_image_4level(data)
+                dest.writestr(entry.filename, data, compress_type=zipfile.ZIP_DEFLATED)
+        validate_epub(temporary)
+        os.replace(temporary, output_path)
         return True
     finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
 
 def main():
     parser = argparse.ArgumentParser(description="HaakanPoint EPUB Optimizer for Xteink X3")

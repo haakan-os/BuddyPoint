@@ -336,6 +336,13 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
   return false;
 }
 bool Ao3Client::loadSession() {
+  bridge.config.load();
+  if (bridge.config.enabled) {
+    username = "bridge";
+    cookies.clear();
+    savedCookies.clear();
+    return true;
+  }
   cookies.clear();
   username.clear();
   savedCookies.clear();
@@ -353,6 +360,7 @@ bool Ao3Client::loadSession() {
   return signedIn();
 }
 bool Ao3Client::saveSession() {
+  if (bridge.config.enabled) return true;
   if (!signedIn() || savedCookies == cookies.header()) return true;
   JsonDocument doc;
   doc["username"] = username;
@@ -365,6 +373,11 @@ bool Ao3Client::saveSession() {
   return true;
 }
 bool Ao3Client::signOut() {
+  if (bridge.config.enabled) {
+    const bool ok = bridge.logout();
+    lastError = bridge.error;
+    return ok;
+  }
   cookies.clear();
   savedCookies.clear();
   username.clear();
@@ -379,6 +392,12 @@ bool Ao3Client::signOut() {
   return true;
 }
 bool Ao3Client::signIn(const std::string& user, const std::string& password) {
+  if (bridge.config.enabled) {
+    const bool ok = bridge.login(user, password);
+    lastError = bridge.error;
+    if (ok) username = "bridge";
+    return ok;
+  }
   LOG_INF("AO3", "Sign-in: requesting login form");
   if (user.empty() || user.size() > 80 || password.empty() || password.size() > 256) {
     lastError = Error::SignIn;
@@ -418,6 +437,11 @@ bool Ao3Client::fetchWork(const std::string& id, ao3::Work& work) {
     lastError = Error::Parse;
     return false;
   }
+  if (bridge.config.enabled) {
+    const bool ok = bridge.fetchWork(id, work);
+    lastError = bridge.error;
+    return ok;
+  }
   auto parser = makeUniqueNoThrow<ao3::Parser>(ao3::Parser::Mode::Work, id);
   if (!parser) {
     lastError = Error::Memory;
@@ -429,6 +453,11 @@ bool Ao3Client::fetchWork(const std::string& id, ao3::Work& work) {
 }
 bool Ao3Client::fetchList(const std::string& url, bool requireSignIn, std::vector<ao3::Work>& works,
                           std::string& next) {
+  if (bridge.config.enabled) {
+    const bool ok = bridge.fetchList(url, works, next);
+    lastError = bridge.error;
+    return ok;
+  }
   if (requireSignIn && !signedIn()) {
     lastError = Error::SignIn;
     return false;
@@ -628,7 +657,16 @@ bool Ao3Client::download(const ao3::Work& work) {
   const auto url = work.download.empty() ? std::string(ao3::ORIGIN) + "/downloads/" + work.id +
                                                "/work.epub?updated_at=" + ao3::encode(work.updated)
                                          : work.download;
-  bool ok = request(url, nullptr, &file);
+  std::unique_ptr<ao3::Work> prepared;
+  if (bridge.config.enabled) {
+    prepared = makeUniqueNoThrow<ao3::Work>();
+    if (!prepared) {
+      lastError = Error::Memory;
+      return false;
+    }
+  }
+  bool ok = bridge.config.enabled ? bridge.download(work.id, file, *prepared) : request(url, nullptr, &file);
+  if (bridge.config.enabled) lastError = bridge.error;
   file.flush();
   if (!file.close()) {
     lastError = Error::StorageError;
@@ -652,7 +690,7 @@ bool Ao3Client::download(const ao3::Work& work) {
     Storage.remove(temporary.c_str());
     return false;
   }
-  if (!saveWork(work) || !saveSession()) {
+  if (!saveWork(bridge.config.enabled ? *prepared : work) || !saveSession()) {
     lastError = Error::StorageError;
     return false;
   }

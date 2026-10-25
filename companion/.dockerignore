@@ -1,0 +1,8 @@
+**/__pycache__
+**/.venv
+**/.env
+**/*.epub
+**/data
+notes-sync
+mock_server.py
+requirements.txt

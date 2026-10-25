@@ -3,31 +3,23 @@
 #include <Ao3.h>
 #include <HalStorage.h>
 
+#include "Ao3Bridge.h"
+
 class Ao3Client {
  public:
-  enum class Error {
-    None,
-    Network,
-    SignIn,
-    RateLimit,
-    Missing,
-    Parse,
-    StorageError,
-    Cancelled,
-    Memory,
-    Clock,
-    Timeout,
-    Server
-  };
+  using Error = ao3::Error;
   using Progress = bool (*)(void* context, size_t downloaded, size_t total);
   void setProgress(Progress callback, void* context) {
     progress = callback;
     progressContext = context;
+    bridge.setProgress(callback, context);
   }
   bool loadSession();
   bool signIn(const std::string& username, const std::string& password);
   bool signOut();
-  bool signedIn() const { return !username.empty() && !cookies.header().empty(); }
+  bool signedIn() const { return bridge.config.enabled || (!username.empty() && !cookies.header().empty()); }
+  Ao3BridgeConfig& bridgeConfig() { return bridge.config; }
+  bool usesBridge() const { return bridge.config.enabled; }
   const std::string& account() const { return username; }
   Error error() const { return lastError; }
   bool fetchWork(const std::string& id, ao3::Work& work);
@@ -41,6 +33,7 @@ class Ao3Client {
   static std::string bookPath(const std::string& id);
 
  private:
+  Ao3Bridge bridge;
   ao3::Cookies cookies;
   std::string username;
   std::string savedCookies;

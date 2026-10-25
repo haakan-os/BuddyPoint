@@ -130,7 +130,7 @@ inline int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h) {
   }
   for (auto& [name, value] : h->response.headers) {
     esp_http_client_event_t event{HTTP_EVENT_ON_HEADER, h->config.user_data, name.data(), value.data()};
-    h->config.event_handler(&event);
+    if (h->config.event_handler) h->config.event_handler(&event);
   }
   if (!h->response.headersComplete) return -1;
   return h->response.chunked ? 0 : static_cast<int64_t>(h->response.body.size());

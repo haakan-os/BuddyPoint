@@ -28,6 +28,17 @@
     </form>
   </section>
   <section class="card" id="accountCard" hidden>
+    <h2>Docker bridge</h2>
+    <form id="bridgeForm">
+      <label><input id="bridgeEnabled" type="checkbox" style="width:auto"> Use the AO3 bridge</label>
+      <label for="bridgeDefault">Default API URL</label><input id="bridgeDefault" type="url" maxlength="240" placeholder="http://nas.local:8080">
+      <label for="bridgeToken">Device token (leave blank to keep the saved token)</label><input id="bridgeToken" type="password" autocomplete="off" maxlength="128">
+      <p id="bridgeNetworks" class="status muted"></p>
+      <label for="bridgeSsid">Wi-Fi network name (optional override)</label><input id="bridgeSsid" maxlength="32" autocomplete="off">
+      <label for="bridgeUrl">API URL for this Wi-Fi (blank removes its override)</label><input id="bridgeUrl" type="url" maxlength="240" placeholder="http://192.168.1.10:8080">
+      <button id="bridgeButton" type="submit">Save bridge settings</button>
+    </form>
+    <p>Sign in to AO3 on the bridge's own web page, then reopen AO3 on the reader. Network names match exactly; other networks use the default URL. Leave the default blank to allow only configured networks.</p>
     <h2>Your AO3 account</h2>
     <form id="loginForm">
       <label for="username">AO3 username</label>

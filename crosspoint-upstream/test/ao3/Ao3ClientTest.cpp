@@ -520,6 +520,28 @@ TEST_F(Ao3ClientTest, DownloadResizesTransmitBufferForLongRedirectWithoutDroppin
   EXPECT_LT(redirected.transmitBuffer, 6144);
   EXPECT_TRUE(ao3test::files.contains(Ao3Client::bookPath(work.id)));
 }
+TEST_F(Ao3ClientTest, BridgeDownloadPublishesPreparedMetadataAndNeverContactsAo3Directly) {
+  client.bridgeConfig().enabled = true;
+  client.bridgeConfig().defaultUrl = "http://nas.local:8080";
+  client.bridgeConfig().token = std::string(64, 'b');
+  const std::string job(32, 'a');
+  const auto bytes = epub();
+  ao3test::responses.emplace_back(202, "{\"job\":\"" + job + "\"}");
+  ao3test::responses.emplace_back(200,
+                                  "{\"state\":\"done\",\"result\":{\"work\":{\"id\":\"123\",\"title\":\"Updated "
+                                  "fic\",\"chapters\":3},\"path\":\"/api/v1/files/" +
+                                      job + "\",\"size\":" + std::to_string(bytes.size()) + "}}");
+  ao3test::responses.emplace_back(200, bytes);
+  ASSERT_TRUE(client.download(work));
+  ao3::Work saved;
+  ASSERT_TRUE(client.readDownloaded("123", saved));
+  EXPECT_EQ(saved.title, "Updated fic");
+  EXPECT_EQ(saved.chapters, 3U);
+  for (const auto& request : ao3test::requests) {
+    EXPECT_TRUE(request.url.starts_with("http://nas.local:8080/api/v1/"));
+    EXPECT_FALSE(request.headers.contains("Cookie"));
+  }
+}
 }  // namespace
 
 TEST_F(Ao3ClientTest, LoginRecognizesCurrentAo3NavigationWithoutWaitingForPageTails) {

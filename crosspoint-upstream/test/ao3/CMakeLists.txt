@@ -16,6 +16,8 @@ add_executable(Ao3ClientTest
   Ao3WebTest.cpp
   ../../src/network/Ao3WebJobs.cpp
   ../../src/network/Ao3Client.cpp
+  ../../src/network/Ao3Bridge.cpp
+  Ao3BridgeTest.cpp
   ../../lib/Ao3/Ao3.cpp
   ../../lib/ZipFile/ZipFile.cpp
   ../../lib/miniz/src/InflateStream.cpp

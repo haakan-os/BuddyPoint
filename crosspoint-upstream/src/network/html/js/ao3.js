@@ -38,9 +38,32 @@
       const data = await request('/api/pair', { code: el('pairCode').value });
       if (!data.token) throw new Error('The reader returned an unexpected response.');
       token = data.token; el('pairCode').value = '';
+      if (data.bridge) {
+        el('bridgeEnabled').checked = data.bridge.enabled;
+        el('bridgeDefault').value = data.bridge.default_url || '';
+        el('bridgeSsid').value = data.bridge.ssid || '';
+        const networks = data.bridge.networks || [];
+        el('bridgeNetworks').textContent = networks.map(n => n.ssid + ': ' + n.url).join('\n');
+        el('bridgeUrl').value = (networks.find(n => n.ssid === data.bridge.ssid) || {}).url || '';
+      }
       el('pairCard').hidden = true; el('accountCard').hidden = false;
     } catch (error) { message(error.name === 'AbortError' ? 'The reader did not respond. Check its AO3 screen and try connecting again.' : error.message); }
     finally { submitting = false; el('pairButton').disabled = false; }
+  });
+  el('bridgeForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (submitting || handedOff || !token) return;
+    submitting = true; el('bridgeButton').disabled = true;
+    const body = { enabled: !!el('bridgeEnabled').checked, default_url: el('bridgeDefault').value.trim(),
+      ssid: el('bridgeSsid').value, url: el('bridgeUrl').value.trim() };
+    if (el('bridgeToken').value) body.token = el('bridgeToken').value;
+    el('bridgeToken').value = '';
+    try {
+      const result = await request('/api/bridge', body);
+      if (!result.saved) throw new Error('The reader did not confirm saving the settings.');
+      message('Bridge settings saved. Leave File Transfer and reopen AO3 on your reader.');
+    } catch (error) { message(error.name === 'AbortError' ? 'No confirmation received. Reopen the panel to check saved settings.' : error.message); }
+    finally { body.token = ''; submitting = false; el('bridgeButton').disabled = false; }
   });
   el('loginForm').addEventListener('submit', async event => {
     event.preventDefault();

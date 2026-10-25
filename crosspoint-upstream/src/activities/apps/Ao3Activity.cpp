@@ -35,6 +35,8 @@ const char* errorText(Ao3Client::Error error) {
       return tr(STR_AO3_TIMEOUT);
     case Ao3Client::Error::Server:
       return tr(STR_AO3_SERVER_ERROR);
+    case Ao3Client::Error::BridgeConfig:
+      return tr(STR_AO3_BRIDGE_CONFIG_ERROR);
     default:
       return tr(STR_AO3_NETWORK_ERROR);
   }
@@ -55,7 +57,10 @@ Ao3Activity::Ao3Activity(GfxRenderer& renderer, MappedInputManager& input, std::
 Ao3Activity::~Ao3Activity() { std::fill(loginPassword.begin(), loginPassword.end(), '\0'); }
 void Ao3Activity::onEnter() {
   const bool incomingLogin = !loginUser.empty() && !loginPassword.empty();
-  if (!incomingLogin) client.loadSession();
+  if (!incomingLogin)
+    client.loadSession();
+  else
+    client.bridgeConfig().load();
   UiListActivity::onEnter();
   app.on(ACTION_CANCEL, cancelAction, this);
   if (incomingLogin) {
@@ -98,8 +103,17 @@ void Ao3Activity::rebuildLabels() {
     labels.emplace_back(tr(STR_AO3_BOOKMARKS));
     labels.emplace_back(tr(STR_AO3_SYNC_BOOKMARKS));
     labels.emplace_back(tr(STR_AO3_CHECK_UPDATES));
-    labels.emplace_back(client.signedIn() ? std::string(tr(STR_AO3_SIGN_OUT)) + " (" + client.account() + ")"
-                                          : tr(STR_AO3_SIGN_IN));
+    labels.emplace_back(client.usesBridge() ? tr(STR_AO3_BRIDGE_ACCOUNT)
+                        : client.signedIn() ? std::string(tr(STR_AO3_SIGN_OUT)) + " (" + client.account() + ")"
+                                            : tr(STR_AO3_SIGN_IN));
+    labels.emplace_back(tr(STR_AO3_BRIDGE_SETTINGS));
+  } else if (view == View::Bridge) {
+    const auto& config = client.bridgeConfig();
+    labels.emplace_back(config.enabled ? tr(STR_AO3_BRIDGE_ENABLED) : tr(STR_AO3_BRIDGE_DISABLED));
+    labels.emplace_back(std::string(tr(STR_AO3_BRIDGE_DEFAULT)) + ": " + config.defaultUrl);
+    labels.emplace_back(tr(STR_AO3_BRIDGE_TOKEN));
+    labels.emplace_back(tr(STR_AO3_BRIDGE_ADD_WIFI));
+    for (const auto& [ssid, url] : config.networks) labels.emplace_back(ssid + ": " + url);
   } else if (view == View::List) {
     for (size_t i = 0; i < works.size(); ++i) {
       labels.emplace_back(works[i].title);
@@ -145,7 +159,10 @@ void Ao3Activity::showMessage(const std::string& text) {
   }
   show(View::Message);
 }
-void Ao3Activity::showError() { showMessage(errorText(client.error())); }
+void Ao3Activity::showError() {
+  showMessage(client.usesBridge() && client.error() == Ao3Client::Error::SignIn ? tr(STR_AO3_BRIDGE_ACCOUNT_HELP)
+                                                                                : errorText(client.error()));
+}
 void Ao3Activity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
   const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
@@ -344,6 +361,10 @@ void Ao3Activity::execute(Job job) {
     sync(job == Job::Bookmarks);
 }
 void Ao3Activity::activateIndex(int index) {
+  if (view == View::Bridge) {
+    editBridge(index);
+    return;
+  }
   if (view == View::Menu) {
     page = 1;
     if (index == 0) {
@@ -363,14 +384,17 @@ void Ao3Activity::activateIndex(int index) {
     } else if (index == 5)
       schedule(Job::Updates);
     else if (index == 6) {
-      if (client.signedIn()) {
+      if (client.usesBridge()) {
+        showMessage(tr(STR_AO3_BRIDGE_ACCOUNT_HELP));
+      } else if (client.signedIn()) {
         if (client.signOut())
           show(View::Menu);
         else
           showError();
       } else
         editLogin();
-    }
+    } else if (index == 7)
+      show(View::Bridge);
   } else if (view == View::List) {
     if (index < static_cast<int>(works.size())) {
       selected = works[index];
@@ -472,6 +496,84 @@ void Ao3Activity::editLogin() {
     });
   });
 }
+void Ao3Activity::saveBridge() {
+  if (!client.bridgeConfig().save()) {
+    showMessage(tr(STR_AO3_BRIDGE_CONFIG_ERROR));
+    return;
+  }
+  client.loadSession();
+  show(View::Bridge);
+}
+void Ao3Activity::editBridgeNetwork(const std::string& ssid) {
+  std::string initial;
+  for (const auto& [name, url] : client.bridgeConfig().networks)
+    if (name == ssid) initial = url;
+  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_AO3_BRIDGE_WIFI_URL), initial,
+                                                           240, InputType::Url);
+  if (!keyboard) {
+    showMessage(tr(STR_AO3_MEMORY_ERROR));
+    return;
+  }
+  startActivityForResult(std::move(keyboard), [this, ssid](const ActivityResult& result) {
+    if (result.isCancelled) return;
+    if (!client.bridgeConfig().setNetwork(ssid, std::get<KeyboardResult>(result.data).text)) {
+      showMessage(tr(STR_AO3_BRIDGE_CONFIG_ERROR));
+      return;
+    }
+    saveBridge();
+  });
+}
+void Ao3Activity::editBridge(int index) {
+  if (index == 0) {
+    client.bridgeConfig().enabled = !client.bridgeConfig().enabled;
+    saveBridge();
+    return;
+  }
+  if (index >= 4) {
+    const auto entry = static_cast<size_t>(index - 4);
+    if (entry < client.bridgeConfig().networks.size()) editBridgeNetwork(client.bridgeConfig().networks[entry].first);
+    return;
+  }
+  const bool token = index == 2;
+  const auto* title = index == 1 ? tr(STR_AO3_BRIDGE_DEFAULT)
+                      : token    ? tr(STR_AO3_BRIDGE_TOKEN)
+                                 : tr(STR_AO3_BRIDGE_SSID);
+  const std::string initial = index == 1 ? client.bridgeConfig().defaultUrl : token ? "" : WiFi.SSID().c_str();
+  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, title, initial,
+                                                           index == 1 ? 240
+                                                           : token    ? 128
+                                                                      : 32,
+                                                           index == 1 ? InputType::Url
+                                                           : token    ? InputType::Password
+                                                                      : InputType::Text);
+  if (!keyboard) {
+    showMessage(tr(STR_AO3_MEMORY_ERROR));
+    return;
+  }
+  startActivityForResult(std::move(keyboard), [this, index](const ActivityResult& result) {
+    if (result.isCancelled) return;
+    auto value = std::get<KeyboardResult>(result.data).text;
+    if (index == 3) {
+      editBridgeNetwork(value);
+      return;
+    }
+    if (index == 1) {
+      while (!value.empty() && value.back() == '/') value.pop_back();
+      if (!Ao3BridgeConfig::validUrl(value)) {
+        showMessage(tr(STR_AO3_BRIDGE_CONFIG_ERROR));
+        return;
+      }
+      client.bridgeConfig().defaultUrl = value;
+    } else {
+      if (!Ao3BridgeConfig::validToken(value)) {
+        showMessage(tr(STR_AO3_BRIDGE_CONFIG_ERROR));
+        return;
+      }
+      client.bridgeConfig().token = value;
+    }
+    saveBridge();
+  });
+}
 void Ao3Activity::sync(bool bookmarks) {
   selected = ao3::Work{};
   processed = downloaded = unchanged = failed = 0;
@@ -488,7 +590,7 @@ void Ao3Activity::sync(bool bookmarks) {
   while (!stop && !cancelled) {
     if (bookmarks) {
       // Bound a changing/malformed pagination chain; never loop indefinitely.
-      if (++pages > 500) {
+      if (++pages > (client.usesBridge() ? 2000U : 500U)) {
         showMessage(tr(STR_AO3_PAGE_LIMIT));
         return;
       }

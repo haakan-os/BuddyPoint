@@ -1,5 +1,11 @@
 # AO3 on BuddyPoint
 
+For a home server or NAS, the [Docker AO3 bridge](../companion/ao3-bridge/README.md)
+handles account sessions, private bookmarks, EPUB downloads and image optimisation.
+The reader supports a default API URL plus up to eight Wi-Fi-specific overrides,
+configured from **AO3 → Bridge settings** or the paired web panel. Bridge mode
+keeps the existing themed fic lists, badges and `/AO3` download folder.
+
 Open **Apps → AO3**. The menus, keyboard, button hints, touch controls, fonts and colors use BuddyPoint's selected theme, including Retro Mac, NeXTSTEP and Windows 95.
 
 The main **Library → AO3** shelf shows downloaded fics with AvesO3-style four-part status badges, chapter and word counts, fandoms, tags and summary previews. It refreshes the library index when first opened and supports search across fic titles, authors, fandoms and tags. Select a fic to read it. Other library shelves also show the badge beside managed AO3 downloads. **Apps → AO3** provides bookmark browsing, downloads, updates and full fic details using the same badges.

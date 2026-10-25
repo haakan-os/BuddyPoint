@@ -40,6 +40,30 @@ async function pair(b) {
 function credentials(b) { b.el('username').value = ' Reader '; b.el('password').value = 'private-password'; }
 const accepted = [202, { accepted: true, continueOnReader: true }];
 
+test('bridge settings preserve SSID case and omit an unchanged token', async () => {
+  const b = browser(); await pair(b);
+  b.el('bridgeEnabled').checked = true;
+  b.el('bridgeDefault').value = ' https://bridge.example ';
+  b.el('bridgeSsid').value = 'Home WiFi';
+  b.el('bridgeUrl').value = ' http://192.168.1.10:8080 ';
+  b.responses.push([200, {saved: true}]);
+  await b.event('bridgeForm');
+  assert.equal(b.requests[1].path, '/api/bridge');
+  assert.deepEqual(JSON.parse(b.requests[1].body), {enabled: true, default_url: 'https://bridge.example', ssid: 'Home WiFi', url: 'http://192.168.1.10:8080'});
+  assert.equal(b.requests[1].headers.Authorization, 'Bearer test-token');
+});
+test('bridge token clears immediately and is never placed in the URL', async () => {
+  const b = browser(); await pair(b);
+  b.el('bridgeToken').value = 'secret-device-token';
+  b.responses.push([200, {saved: true}]);
+  const sending = b.event('bridgeForm');
+  assert.equal(b.el('bridgeToken').value, '');
+  await sending;
+  assert.equal(JSON.parse(b.requests[1].body).token, 'secret-device-token');
+  assert.equal(b.requests[1].path, '/api/bridge');
+  assert.match(b.el('message').textContent, /settings saved/);
+});
+
 test('pairing sends code once and keeps authorization out of URLs', async () => {
   const b = browser(); await pair(b);
   assert.equal(b.requests.length, 1);

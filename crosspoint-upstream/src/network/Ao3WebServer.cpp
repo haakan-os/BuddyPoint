@@ -97,6 +97,8 @@ const char* errorName(Ao3Client::Error error) {
       return "AO3 returned a server error. Try again later.";
     case Ao3Client::Error::Parse:
       return "AO3 returned an unexpected response or exceeded a page limit.";
+    case Ao3Client::Error::BridgeConfig:
+      return "Check the bridge URL and device token for this Wi-Fi network.";
     default:
       return "Could not securely connect to AO3. Check Wi-Fi and try again.";
   }
@@ -191,7 +193,7 @@ bool Ao3WebServer::startListener() {
   }
   *config = HTTPD_SSL_CONFIG_DEFAULT();
   config->httpd.max_open_sockets = 1;
-  config->httpd.max_uri_handlers = 6;
+  config->httpd.max_uri_handlers = 7;
   config->httpd.max_resp_headers = 10;
   config->httpd.max_req_hdr_len = 2048;
   config->httpd.recv_wait_timeout = 5;
@@ -208,7 +210,7 @@ bool Ao3WebServer::startListener() {
     server = nullptr;
     return false;
   }
-  for (const auto* path : {"/", "/ao3.js", "/api/status", "/api/pair", "/api/login", "/api/action"}) {
+  for (const auto* path : {"/", "/ao3.js", "/api/status", "/api/pair", "/api/login", "/api/action", "/api/bridge"}) {
     httpd_uri_t route{};
     route.uri = path;
     route.method = std::strncmp(path, "/api/", 5) == 0 && std::strcmp(path, "/api/status") ? HTTP_POST : HTTP_GET;
@@ -334,6 +336,35 @@ esp_err_t Ao3WebServer::route(httpd_req_t* request) {
           access.locked() ? "Pairing locked. Leave AO3 mode on the reader and reopen it." : "Incorrect pairing code.");
     doc.clear();
     doc["token"] = access.token();
+    Ao3BridgeConfig config;
+    config.load();
+    doc["bridge"]["enabled"] = config.enabled;
+    doc["bridge"]["default_url"] = config.defaultUrl;
+    doc["bridge"]["has_token"] = !config.token.empty();
+    doc["bridge"]["ssid"] = WiFi.SSID().c_str();
+    auto networks = doc["bridge"]["networks"].to<JsonArray>();
+    for (const auto& [ssid, url] : config.networks) {
+      auto entry = networks.add<JsonObject>();
+      entry["ssid"] = ssid;
+      entry["url"] = url;
+    }
+    return json(request, "200 OK", doc);
+  }
+  if (path == "/api/bridge") {
+    Ao3BridgeConfig config;
+    config.load();
+    config.enabled = doc["enabled"] | false;
+    config.defaultUrl = doc["default_url"] | "";
+    while (!config.defaultUrl.empty() && config.defaultUrl.back() == '/') config.defaultUrl.pop_back();
+    if (!doc["token"].isNull()) config.token = doc["token"].as<std::string>();
+    const std::string ssid = doc["ssid"] | "";
+    if (!ssid.empty() && !config.setNetwork(ssid, doc["url"] | ""))
+      return error(request, "400 Bad Request", "Invalid Wi-Fi override (maximum eight networks).");
+    if (!Ao3BridgeConfig::validUrl(config.defaultUrl) || !Ao3BridgeConfig::validToken(config.token))
+      return error(request, "400 Bad Request", "Enter an HTTP(S) API URL and a valid bridge token.");
+    if (!config.save()) return error(request, "500 Internal Server Error", "Could not save bridge settings to SD.");
+    doc.clear();
+    doc["saved"] = true;
     return json(request, "200 OK", doc);
   }
   if (path == "/api/login") {

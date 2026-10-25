@@ -9,7 +9,7 @@ A CrossPoint-based firmware for the **Xteink X3**, with enhanced KOReader sync, 
 - **BuddySync:** pair with the included KOReader plugin to transfer books and keep reading progress in sync.
 - **Custom themes:** Retro Mac, NeXTSTEP, and Windows 95 styles alongside the CrossPoint themes.
 - **Apps:** Sudoku with saved games, a Markdown viewer, and synced KOReader reading notes.
-- **AO3:** search and download fics, sign in for private bookmarks and account-only works, and download chapter updates from **Apps → AO3**. The **Library → AO3** shelf includes four-part fic badges, reading status and metadata using the current theme. The web interface includes a secure **AO3 Account** panel for sign-in and syncing. See the [AO3 guide](docs/AO3.md).
+- **AO3:** search and download fics, private bookmarks and chapter updates from **Apps → AO3**, with themed four-part fic badges. The optional [Docker bridge](companion/ao3-bridge/README.md) handles AO3 requests and EPUB optimisation on your NAS; the reader selects an API URL for each Wi-Fi network. See the [AO3 guide](docs/AO3.md).
 - **Notes and checklists:** send highlights and notes with BuddySync, and toggle Markdown tasks with the reader buttons. See the [setup guide](docs/NOTES_AND_CHECKLISTS.md).
 - **OneDrive notes:** a Python companion syncs a computer's OneDrive Markdown folder and subfolders with the reader, including checklist edits and conflict copies. See the [desktop sync guide](docs/ONEDRIVE_NOTES_SYNC.md).
 - **Markdown reading:** open `.md` and `.markdown` files from the SD card, with headings, lists, code blocks, and reading progress. See the [viewer guide](crosspoint-upstream/docs/markdown.md).

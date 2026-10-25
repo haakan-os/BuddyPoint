@@ -18,7 +18,7 @@ class Ao3Activity final : public UiListActivity {
   bool handleHomeGesture() override;
 
  private:
-  enum class View { Menu, List, Detail, Busy, Message };
+  enum class View { Menu, List, Detail, Busy, Message, Bridge };
   enum class Source { Downloads, Bookmarks, Search };
   enum class Job { None, List, Work, Login, Download, UpdateOne, Updates, Bookmarks };
   Ao3Client client;
@@ -63,6 +63,9 @@ class Ao3Activity final : public UiListActivity {
   bool ensureWifi(Job job);
   void editQuery(bool link);
   void editLogin();
+  void editBridge(int index);
+  void editBridgeNetwork(const std::string& ssid);
+  void saveBridge();
   void showError();
   void showMessage(const std::string& text);
   void sync(bool bookmarks);

@@ -11,6 +11,21 @@ namespace ao3 {
 constexpr size_t PAGE_SIZE = 20;
 constexpr size_t MAX_COOKIE_BYTES = 4096;
 constexpr const char* ORIGIN = "https://archiveofourown.org";
+enum class Error {
+  None,
+  Network,
+  SignIn,
+  RateLimit,
+  Missing,
+  Parse,
+  StorageError,
+  Cancelled,
+  Memory,
+  Clock,
+  Timeout,
+  Server,
+  BridgeConfig
+};
 
 enum class ReadingStatus : uint8_t { Unread, Reading, Finished, Waiting, NewChapters };
 
