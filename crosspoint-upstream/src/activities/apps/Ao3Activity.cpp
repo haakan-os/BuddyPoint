@@ -85,6 +85,12 @@ int Ao3Activity::listCount() const { return view == View::Busy || view == View::
 void Ao3Activity::rebuildLabels() {
   labels.clear();
   subtitles.clear();
+  badges.reset();
+  const size_t badgeCount = view == View::List ? works.size() : view == View::Detail ? 1 : 0;
+  if (badgeCount) {
+    badges = makeUniqueNoThrow<ao3::Badge[]>(badgeCount);
+    if (!badges) LOG_ERR("AO3", "Not enough memory for fic badges");
+  }
   if (view == View::Menu) {
     labels.emplace_back(tr(STR_AO3_DOWNLOADS));
     labels.emplace_back(tr(STR_AO3_OPEN_WORK));
@@ -98,7 +104,7 @@ void Ao3Activity::rebuildLabels() {
     for (size_t i = 0; i < works.size(); ++i) {
       labels.emplace_back(works[i].title);
       subtitles.emplace_back(ao3ui::subtitle(works[i], true));
-      badges[i].build(works[i]);
+      if (badges) badges[i].build(works[i]);
     }
     if (page > 1) labels.emplace_back(tr(STR_PREV_PAGE));
     if (more) labels.emplace_back(tr(STR_NEXT_PAGE));
@@ -118,7 +124,7 @@ void Ao3Activity::rebuildLabels() {
     if (!selected.tags.empty()) labels.emplace_back(selected.tags);
     if (!selected.summary.empty()) labels.emplace_back(selected.summary);
     labels.emplace_back(tr(STR_AO3_BADGE_LEGEND));
-    badges[0].build(selected);
+    if (badges) badges[0].build(selected);
   }
 }
 void Ao3Activity::show(View next) {
@@ -167,8 +173,8 @@ void Ao3Activity::buildScreen(UiScreen& screen) {
     rows[i].label = labels[i].c_str();
     rows[i].actionValue = i;
     rows[i].subtitle = view == View::List && i < subtitles.size() ? subtitles[i].c_str() : nullptr;
-    rows[i].icon = view == View::List && i < works.size() ? ao3ui::bitmap(badges[i]) : fui::BitmapRef{};
-    if (view == View::Detail && i == 2) rows[i].icon = ao3ui::bitmap(badges[0]);
+    rows[i].icon = badges && view == View::List && i < works.size() ? ao3ui::bitmap(badges[i]) : fui::BitmapRef{};
+    if (badges && view == View::Detail && i == 2) rows[i].icon = ao3ui::bitmap(badges[0]);
   }
   fui::ListProps props;
   props.labelText = screen.theme().bodyText;
@@ -225,7 +231,11 @@ void Ao3Activity::schedule(Job job) {
   show(View::Busy);
 }
 bool Ao3Activity::ensureWifi(Job job) {
-  if (WiFi.status() == WL_CONNECTED) return true;
+  if (WiFi.status() == WL_CONNECTED) {
+    LOG_INF("AO3", "Using existing WiFi connection");
+    return true;
+  }
+  LOG_INF("AO3", "WiFi disconnected; opening network selection");
   wifiStarted = true;
   auto wifi = makeUniqueNoThrow<WifiSelectionActivity>(renderer, mappedInput);
   if (!wifi) {
@@ -268,8 +278,10 @@ std::string Ao3Activity::listUrl(size_t number) const {
          "&page=" + std::to_string(number);
 }
 void Ao3Activity::execute(Job job) {
+  // Busy screens do not reference list entries. Release their capacity as well
+  // as strings before creating another parser or opening TLS.
+  std::vector<ao3::Work>().swap(works);
   if (job == Job::List) {
-    works.clear();
     if (source == Source::Downloads) {
       if (!client.downloadedPage((page - 1) * ao3::PAGE_SIZE, works, more)) {
         showError();
@@ -290,7 +302,7 @@ void Ao3Activity::execute(Job job) {
     show(View::List);
   } else if (job == Job::Work) {
     const auto id = selected.id;
-    works.clear();
+    selected = ao3::Work{};
     if (!client.fetchWork(id, selected)) {
       showError();
       return;
@@ -309,9 +321,10 @@ void Ao3Activity::execute(Job job) {
     else
       showError();
   } else if (job == Job::Download || job == Job::UpdateOne) {
-    works.clear();
+    const auto id = selected.id;
+    selected = ao3::Work{};
     ao3::Work remote;
-    if (!client.fetchWork(selected.id, remote)) {
+    if (!client.fetchWork(id, remote)) {
       showError();
       return;
     }
@@ -460,7 +473,7 @@ void Ao3Activity::editLogin() {
   });
 }
 void Ao3Activity::sync(bool bookmarks) {
-  works.clear();
+  selected = ao3::Work{};
   processed = downloaded = unchanged = failed = 0;
   HalFile queue;
   if (!bookmarks) {
@@ -480,7 +493,7 @@ void Ao3Activity::sync(bool bookmarks) {
         return;
       }
       const auto current = next;
-      works.clear();
+      std::vector<ao3::Work>().swap(works);
       if (!client.fetchList(current, true, works, next)) {
         ++failed;
         stop = true;
@@ -492,7 +505,7 @@ void Ao3Activity::sync(bool bookmarks) {
         break;
       }
     } else {
-      works.clear();
+      std::vector<ao3::Work>().swap(works);
       works.reserve(ao3::PAGE_SIZE);
       while (queue.available() && works.size() < ao3::PAGE_SIZE) {
         std::string id;
@@ -506,22 +519,28 @@ void Ao3Activity::sync(bool bookmarks) {
         if (client.readDownloaded(id, prior)) works.push_back(std::move(prior));
       }
     }
-    for (const auto& item : works) {
+    // Keep only identifiers and display titles while fetching each work, not a
+    // whole page of summaries, tags and download URLs alongside TLS buffers.
+    std::vector<std::pair<std::string, std::string>> batch;
+    batch.reserve(works.size());
+    for (auto& item : works) batch.emplace_back(std::move(item.id), std::move(item.title));
+    std::vector<ao3::Work>().swap(works);
+    for (const auto& [id, title] : batch) {
       if (cancelled) break;
       {
         RenderLock lock;
-        status = item.title;
+        status = title;
       }
       requestUpdateAndWait();
       ao3::Work remote, prior;
-      if (!client.fetchWork(item.id, remote)) {
+      if (!client.fetchWork(id, remote)) {
         ++failed;
         if (client.error() == Ao3Client::Error::RateLimit || client.error() == Ao3Client::Error::SignIn ||
             client.error() == Ao3Client::Error::Cancelled || client.error() == Ao3Client::Error::Server) {
           stop = true;
           break;
         }
-      } else if (client.readDownloaded(item.id, prior) && !ao3::changed(prior, remote))
+      } else if (client.readDownloaded(id, prior) && !ao3::changed(prior, remote))
         ++unchanged;
       else if (client.download(remote))
         ++downloaded;

@@ -111,6 +111,7 @@ TEST_F(Ao3ClientTest, LoginUsesCsrfVerifiedTlsCookiesAndPersistsNoPassword) {
   for (size_t i = 0; i < ao3test::requests.size(); ++i) {
     EXPECT_TRUE(ao3test::requests[i].tlsVerified);
     EXPECT_TRUE(ao3test::requests[i].manualRedirect);
+    EXPECT_LE(ao3test::requests[i].transmitBuffer, 2048);
     if (i) {
       EXPECT_GE(ao3test::requests[i].started - ao3test::requests[i - 1].started, 2000U);
     }
@@ -489,7 +490,7 @@ TEST_F(Ao3ClientTest, WebJobsSnapshotFailureFinishesBeforeQueueIsOpened) {
 }
 TEST_F(Ao3ClientTest, LoginRetainsLongSessionCookiesThroughRotation) {
   const std::string before = "_session=" + std::string(3000, 'a');
-  const std::string after = "_session=" + std::string(3500, 'b');
+  const std::string after = "_session=" + std::string(ao3::MAX_COOKIE_BYTES - 9, 'b');
   ao3test::responses.push_back({200,
                                 "<input name='authenticity_token' value='csrf'><input name='user[password]'>",
                                 {{"Set-Cookie", before + "; Path=/; Secure; HttpOnly"}}});
@@ -505,6 +506,19 @@ TEST_F(Ao3ClientTest, LoginRetainsLongSessionCookiesThroughRotation) {
   Ao3Client restored;
   ASSERT_TRUE(restored.loadSession());
   EXPECT_EQ(restored.account(), "Reader");
+}
+TEST_F(Ao3ClientTest, DownloadResizesTransmitBufferForLongRedirectWithoutDroppingSession) {
+  login();
+  const auto destination = std::string(ORIGIN) + "/downloads/123/" + std::string(1800, 'a') + ".epub";
+  ao3test::responses.push_back({302, "", {{"Location", destination}}});
+  ao3test::responses.push_back({200, epub()});
+  ASSERT_TRUE(client.download(work));
+  const auto& redirected = ao3test::requests.back();
+  EXPECT_EQ(redirected.url, destination);
+  EXPECT_EQ(redirected.headers.at("Cookie"), "_session=authenticated");
+  EXPECT_TRUE(redirected.tlsVerified);
+  EXPECT_LT(redirected.transmitBuffer, 6144);
+  EXPECT_TRUE(ao3test::files.contains(Ao3Client::bookPath(work.id)));
 }
 }  // namespace
 

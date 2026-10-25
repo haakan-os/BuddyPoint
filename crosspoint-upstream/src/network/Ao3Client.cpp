@@ -173,7 +173,9 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
     // esp_http_client reassembles fragmented headers before dispatching them.
     // A long Set-Cookie does not require an equally large receive buffer.
     config->buffer_size = 2048;
-    config->buffer_size_tx = 6144;
+    // The SDK sends headers in batches, but each header and the request line
+    // must fit individually. Size for this hop's cookie/URL, including framing.
+    config->buffer_size_tx = std::max<size_t>(1024, std::max(url.size(), cookies.header().size()) + 128);
     config->disable_auto_redirect = true;
     config->crt_bundle_attach = esp_crt_bundle_attach;
     config->event_handler = Headers::event;

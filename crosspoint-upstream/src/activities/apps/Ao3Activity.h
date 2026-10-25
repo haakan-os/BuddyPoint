@@ -3,6 +3,7 @@
 #include <Ao3Badge.h>
 
 #include <array>
+#include <memory>
 
 #include "activities/UiListActivity.h"
 #include "network/Ao3Client.h"
@@ -30,8 +31,8 @@ class Ao3Activity final : public UiListActivity {
   // stable while FreeInkUI renders; no allocations occur in buildScreen().
   std::vector<std::string> labels;
   std::array<freeink::ui::ListItem, ao3::PAGE_SIZE + 4> rows{};
-  // 5.6 KiB for one bounded page of masks, owned by the heap-allocated activity.
-  std::array<ao3::Badge, ao3::PAGE_SIZE> badges{};
+  // Allocate visible masks only; release them before TLS needs its handshake buffers.
+  std::unique_ptr<ao3::Badge[]> badges;
   std::vector<std::string> subtitles;
   std::string query;
   std::string loginUser;

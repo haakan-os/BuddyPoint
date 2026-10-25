@@ -54,6 +54,7 @@ struct Request {
   bool nonBlocking = false;
   size_t bytesRead = 0, readCalls = 0, headerCalls = 0;
   int readTimeout = -1;
+  int transmitBuffer = 0;
 };
 inline std::deque<Response> responses;
 inline std::vector<Request> requests;
@@ -74,6 +75,7 @@ inline auto esp_http_client_init(const esp_http_client_config_t* config) {
   request.tlsVerified = config->crt_bundle_attach != nullptr;
   request.manualRedirect = config->disable_auto_redirect;
   request.started = ao3test::clock;
+  request.transmitBuffer = config->buffer_size_tx;
   ao3test::requests.push_back(std::move(request));
   auto* http = new ao3test::Http{*config, std::move(ao3test::responses.front()), ao3test::requests.size() - 1};
   int sockets[2];
@@ -98,7 +100,18 @@ inline int esp_http_client_set_method(esp_http_client_handle_t h, int method) {
   ao3test::requests[h->requestIndex].method = method;
   return ESP_OK;
 }
-inline int esp_http_client_open(esp_http_client_handle_t h, int) { return h->response.connect ? ESP_OK : -1; }
+inline int esp_http_client_open(esp_http_client_handle_t h, int) {
+  const auto& request = ao3test::requests[h->requestIndex];
+  // Match the SDK's buffer contract: it batches complete header lines and
+  // requires the request line to fit before sending any headers.
+  const auto path = request.url.find('/', request.url.find("://") + 3);
+  const size_t requestLine = (path == std::string::npos ? 1 : request.url.size() - path) + 16;
+  if (requestLine >= static_cast<size_t>(request.transmitBuffer)) return -1;
+  for (const auto& [key, value] : request.headers) {
+    if (key.size() + value.size() + 7 > static_cast<size_t>(request.transmitBuffer)) return -1;
+  }
+  return h->response.connect ? ESP_OK : -1;
+}
 inline int esp_http_client_get_and_clear_last_tls_error(esp_http_client_handle_t, int* error, int* flags) {
   *error = 0;
   *flags = 0;
