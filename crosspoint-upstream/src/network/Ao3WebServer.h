@@ -19,6 +19,7 @@ class Ao3WebServer {
   void tick();
   void cancel() { jobs.cancel(); }
   bool busy() const { return jobs.busy(); }
+  bool failed() const { return listenerFailed.load(); }
   Ao3WebJobs::Status status() const { return jobs.status(); }
   void setObserver(void (*callback)(void*), void* context) { jobs.setObserver(callback, context); }
   const std::string& code() const { return pairingCode; }
@@ -28,6 +29,7 @@ class Ao3WebServer {
   void* server = nullptr;
   std::atomic<unsigned long> startNotBefore{0};
   std::atomic<bool> handlingRequest{false};
+  std::atomic<bool> listenerFailed{false};
   // Heap-owned with this server; no persistent private key is written to SD.
   std::array<uint8_t, 2048> certificate{};
   std::array<uint8_t, 512> privateKey{};
@@ -37,6 +39,8 @@ class Ao3WebServer {
   std::mutex accessMutex;
   Ao3WebJobs jobs;
   bool createIdentity();
+  bool startListener();
+  void stopListener();
   static int handle(httpd_req* request);
   int route(httpd_req* request);
 };

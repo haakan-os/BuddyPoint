@@ -20,7 +20,7 @@
   <p class="muted">BuddyPoint · Keep File Transfer open on your reader while using this panel.</p>
   <section class="card" id="pairCard">
     <h2>Connect to your reader</h2>
-    <p>Check this site's SHA-256 certificate fingerprint against the reader's AO3 screen before entering the code. The code changes when you reopen File Transfer.</p>
+    <p>Check this site's SHA-256 certificate fingerprint against the reader's AO3 screen before entering the code. The code changes when you leave and reopen AO3 mode.</p>
     <form id="pairForm">
       <label for="pairCode">Eight-digit code shown on the reader</label>
       <input id="pairCode" name="pairing-code" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" autocomplete="off" required>
@@ -49,7 +49,7 @@
     <p id="jobStatus" class="status" aria-live="polite">Ready</p>
     <progress id="progress" max="100" value="0" hidden></progress>
     <button id="cancelButton" type="button" class="secondary" disabled>Cancel job</button>
-    <p class="muted">Completed downloads stay in /AO3. File uploads wait while an AO3 job runs. Cancellation takes effect between network reads.</p>
+    <p class="muted">Completed downloads stay in /AO3. File Transfer is paused in AO3 mode. Status refreshes and browser cancellation take effect between AO3 requests. Keep this tab open to send a queued cancellation; press Back on the reader to stop during a download.</p>
   </section>
   <p id="message" role="status" aria-live="polite"></p>
 </body>

@@ -12,7 +12,8 @@ function browser() {
   };
   vm.runInNewContext(script, { document: { getElementById: el },
     fetch: async (path, options) => { requests.push({ path, ...options }); assert.ok(responses.length, 'unexpected fetch');
-      const [status, data] = responses.shift(); return { ok: status < 400, status, json: async () => data }; },
+      const next = responses.shift(); if (next instanceof Error) throw next;
+      const [status, data] = next; return { ok: status < 400, status, json: async () => data }; },
     setTimeout: cb => { const id = timers.size + 1; timers.set(id, cb); return id; }, clearTimeout: id => timers.delete(id) });
   return { el, requests, responses, timers, event: (id, type = 'click') => el(id).listeners[type]({ preventDefault() {} }) };
 }
@@ -65,4 +66,28 @@ test('busy errors are displayed and password stays cleared', async () => {
   b.responses.push([409, { error: 'Another job is running' }], [200, { ...status, busy: true }]);
   await b.event('loginForm', 'submit');
   assert.equal(b.el('password').value, ''); assert.match(b.el('message').textContent, /Another job/);
+});
+
+test('polling reconnects after the listener pauses without losing pairing', async () => {
+  const b = browser(); await pair(b);
+  b.responses.push(new Error('Network unavailable'));
+  await [...b.timers.values()][0]();
+  assert.equal(b.el('pairCard').hidden, true);
+  assert.match(b.el('message').textContent, /Status refreshes between AO3 requests/);
+  b.responses.push([200, { ...status, phase: 'Finished' }]);
+  await [...b.timers.values()][0]();
+  assert.equal(b.requests.at(-1).headers.Authorization, 'Bearer test-token');
+  assert.equal(b.el('message').textContent, '');
+});
+test('cancellation retries after a paused listener and then resumes status polling', async () => {
+  const b = browser(); await pair(b);
+  b.responses.push(new Error('Network unavailable'), new Error('Network unavailable'));
+  await b.event('cancelButton');
+  assert.match(b.el('message').textContent, /Cancellation queued/);
+  b.responses.push([202, { accepted: true }], [200, { ...status, phase: 'Cancelled' }]);
+  await [...b.timers.values()][0]();
+  assert.equal(b.requests.at(-2).path, '/api/action');
+  assert.equal(JSON.parse(b.requests.at(-2).body).action, 'cancel');
+  assert.equal(b.requests.at(-1).path, '/api/status');
+  assert.match(b.el('jobStatus').textContent, /Cancelled/);
 });

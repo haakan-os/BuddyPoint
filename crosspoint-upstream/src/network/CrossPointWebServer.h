@@ -83,6 +83,7 @@ class CrossPointWebServer {
   // Call this periodically to handle client requests
   void handleClient();
   bool enableAo3();
+  void disableAo3();
   Ao3WebServer* ao3() const { return ao3Server.get(); }
 
   // Called on the serving task after each multipart upload event. A function

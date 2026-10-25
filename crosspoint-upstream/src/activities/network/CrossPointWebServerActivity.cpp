@@ -373,6 +373,13 @@ void CrossPointWebServerActivity::loop() {
       constexpr int MAX_ITERATIONS = 500;
       for (int i = 0; i < MAX_ITERATIONS && webServer->isRunning(); i++) {
         webServer->handleClient();
+        if (webServer->ao3() && webServer->ao3()->failed() && !ao3Unavailable) {
+          {
+            RenderLock lock;
+            ao3Unavailable = true;
+          }
+          requestUpdate();
+        }
         if (exitAfterAo3) {
           onGoHome();
           return;
@@ -548,9 +555,10 @@ bool CrossPointWebServerActivity::handleServerInput() {
   if (!isApMode && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     {
       RenderLock lock;
-      if (showAo3)
+      if (showAo3) {
+        webServer->disableAo3();
         showAo3 = false;
-      else {
+      } else {
         if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
         ao3Unavailable = !webServer->enableAo3();
         if (!ao3Unavailable) webServer->ao3()->setObserver(ao3Progress, this);

@@ -153,7 +153,15 @@ bool Ao3WebServer::createIdentity() {
 }
 bool Ao3WebServer::begin(const std::string& ip) {
   if (server) return true;
-  if (WiFi.status() != WL_CONNECTED || ESP.getFreeHeap() < 110000 || ESP.getMaxAllocHeap() < 30000) return false;
+  if (WiFi.status() != WL_CONNECTED) {
+    LOG_ERR("AO3WEB", "Cannot start: Wi-Fi disconnected");
+    return false;
+  }
+  if (ESP.getFreeHeap() < 70000 || ESP.getMaxAllocHeap() < 22000) {
+    LOG_ERR("AO3WEB", "Cannot start: free heap %u, largest block %u (need 70000 / 22000)", ESP.getFreeHeap(),
+            ESP.getMaxAllocHeap());
+    return false;
+  }
   address = ip;
   if (!createIdentity()) {
     LOG_ERR("AO3WEB", "Could not create local TLS identity");
@@ -166,8 +174,17 @@ bool Ao3WebServer::begin(const std::string& ip) {
   esp_fill_random(secret, sizeof(secret));
   access.reset(pairingCode, hex(secret, sizeof(secret)));
   mbedtls_platform_zeroize(secret, sizeof(secret));
+  return startListener();
+}
+
+bool Ao3WebServer::startListener() {
+  // One browser TLS session (~40 KiB per the SDK), plus the HTTPS task. AO3
+  // requests run with this listener stopped, including its task and TLS buffers.
   auto config = makeUniqueNoThrow<httpd_ssl_config_t>();
-  if (!config) return false;
+  if (!config) {
+    LOG_ERR("AO3WEB", "Cannot allocate HTTPS server configuration");
+    return false;
+  }
   *config = HTTPD_SSL_CONFIG_DEFAULT();
   config->httpd.max_open_sockets = 1;
   config->httpd.max_uri_handlers = 6;
@@ -181,7 +198,9 @@ bool Ao3WebServer::begin(const std::string& ip) {
   config->servercert_len = certificateLength;
   config->prvtkey_pem = privateKey.data();
   config->prvtkey_len = std::strlen(reinterpret_cast<char*>(privateKey.data())) + 1;
-  if (httpd_ssl_start(&server, config.get()) != ESP_OK) {
+  const auto startResult = httpd_ssl_start(&server, config.get());
+  if (startResult != ESP_OK) {
+    LOG_ERR("AO3WEB", "HTTPS server startup failed: %s", esp_err_to_name(startResult));
     server = nullptr;
     return false;
   }
@@ -191,7 +210,9 @@ bool Ao3WebServer::begin(const std::string& ip) {
     route.method = std::strncmp(path, "/api/", 5) == 0 && std::strcmp(path, "/api/status") ? HTTP_POST : HTTP_GET;
     route.handler = handle;
     route.user_ctx = this;
-    if (httpd_register_uri_handler(server, &route) != ESP_OK) {
+    const auto routeResult = httpd_register_uri_handler(server, &route);
+    if (routeResult != ESP_OK) {
+      LOG_ERR("AO3WEB", "HTTPS route registration failed: %s", esp_err_to_name(routeResult));
       stop();
       return false;
     }
@@ -200,13 +221,31 @@ bool Ao3WebServer::begin(const std::string& ip) {
 }
 void Ao3WebServer::stop() {
   jobs.cancel();
+  stopListener();
+}
+void Ao3WebServer::stopListener() {
   if (server) {
     httpd_ssl_stop(server);
     server = nullptr;
   }
 }
 void Ao3WebServer::tick() {
-  if (!handlingRequest.load() && static_cast<long>(millis() - startNotBefore.load()) >= 0) jobs.tick();
+  if (listenerFailed || !jobs.busy() || handlingRequest.load() ||
+      static_cast<long>(millis() - startNotBefore.load()) < 0)
+    return;
+  // Stop waits for the HTTPS task and all incoming sockets to close. Keep the
+  // identity and pairing token in RAM so the browser can reconnect unchanged.
+  stopListener();
+  jobs.tick();
+  if (!startListener()) {
+    listenerFailed = true;
+    jobs.cancel();
+    jobs.tick();
+    return;
+  }
+  // Give polling/cancel requests a window between works. Their replies also
+  // defer the next job tick until the response has been sent.
+  startNotBefore = millis() + 3000;
 }
 esp_err_t Ao3WebServer::handle(httpd_req_t* request) {
   auto* self = static_cast<Ao3WebServer*>(request->user_ctx);
@@ -277,9 +316,9 @@ esp_err_t Ao3WebServer::route(httpd_req_t* request) {
   if (path == "/api/pair") {
     std::lock_guard<std::mutex> lock(accessMutex);
     if (!access.pair(doc["code"] | ""))
-      return error(request, access.locked() ? "429 Too Many Requests" : "403 Forbidden",
-                   access.locked() ? "Pairing locked. Exit File Transfer on the reader and reopen it."
-                                   : "Incorrect pairing code.");
+      return error(
+          request, access.locked() ? "429 Too Many Requests" : "403 Forbidden",
+          access.locked() ? "Pairing locked. Leave AO3 mode on the reader and reopen it." : "Incorrect pairing code.");
     doc.clear();
     doc["token"] = access.token();
     return json(request, "200 OK", doc);

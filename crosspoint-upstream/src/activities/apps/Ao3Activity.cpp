@@ -524,7 +524,7 @@ void Ao3Activity::sync(bool bookmarks) {
     }
     if (bookmarks ? next.empty() : !queue.available()) break;
   }
-  queue.close();
+  if (queue) queue.close();
   if (!bookmarks) Storage.remove(Ao3Client::UPDATE_QUEUE);
   std::string summary = std::to_string(downloaded) + " " + tr(STR_AO3_SAVED) + ", " + std::to_string(unchanged) + " " +
                         tr(STR_AO3_UNCHANGED) + ", " + std::to_string(failed) + " " + tr(STR_AO3_FAILED);

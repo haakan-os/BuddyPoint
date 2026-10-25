@@ -3,6 +3,8 @@
   let token = '';
   let timer = null;
   let submitting = false;
+  let pendingCancel = false;
+  let waitingForReader = false;
   const el = id => document.getElementById(id);
   const message = text => { el('message').textContent = text; };
 
@@ -11,12 +13,14 @@
     if (token) headers.Authorization = 'Bearer ' + token;
     const options = { method: body === undefined ? 'GET' : 'POST', headers, cache: 'no-store', credentials: 'omit' };
     if (body !== undefined) { headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(body); }
-    const response = await fetch(path, options);
+    let response;
+    try { response = await fetch(path, options); }
+    catch (error) { error.retryable = true; throw error; }
     let data;
     try { data = await response.json(); } catch (_) { throw new Error('The reader returned an unexpected response.'); }
     if (!response.ok) {
       if (response.status === 401) {
-        token = ''; clearTimeout(timer);
+        token = ''; pendingCancel = false; clearTimeout(timer);
         el('pairCard').hidden = false; el('accountCard').hidden = true; el('jobCard').hidden = true;
       }
       throw new Error(data.error || 'The reader could not complete this request.');
@@ -41,15 +45,30 @@
   async function poll() {
     clearTimeout(timer);
     if (!token) return;
-    try { render(await request('/api/status')); }
-    catch (error) { message(error.message + ' If disconnected, keep the reader on and reopen its AO3 page.'); }
+    try {
+      if (pendingCancel) {
+        await request('/api/action', { action: 'cancel' });
+        pendingCancel = false;
+      }
+      render(await request('/api/status'));
+      if (waitingForReader) { message(''); waitingForReader = false; }
+    } catch (error) {
+      if (error.retryable) {
+        waitingForReader = true;
+        message(pendingCancel ? 'Cancellation queued in this tab. Keep it open; it will be sent between AO3 requests. Press Back on the reader to stop sooner.' :
+          'Waiting for the reader. Status refreshes between AO3 requests; keep this tab open.');
+      } else message(error.message);
+    }
     if (token) timer = setTimeout(poll, 2000);
   }
   async function submit(path, body) {
     if (submitting) return;
     submitting = true; message('');
     try { await request(path, body); message('Request accepted. Follow progress below.'); }
-    catch (error) { message(error.message); }
+    catch (error) {
+      if (error.retryable && body.action === 'cancel') pendingCancel = true;
+      else message(error.message);
+    }
     finally { submitting = false; await poll(); }
   }
   el('pairForm').addEventListener('submit', async event => {

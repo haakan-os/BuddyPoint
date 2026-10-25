@@ -421,4 +421,39 @@ TEST_F(Ao3ClientTest, WebJobsPublicUpdatesDownloadNewChapters) {
   ASSERT_TRUE(client.readDownloaded("123", work));
   EXPECT_EQ(work.chapters, 3U);
 }
+TEST_F(Ao3ClientTest, WebJobsDestructionBeforeAnyJobDoesNotCloseAnUnopenedQueue) {
+  {
+    Ao3WebJobs jobs;
+  }
+  EXPECT_TRUE(ao3test::requests.empty());
+  EXPECT_TRUE(ao3test::files.empty());
+}
+TEST_F(Ao3ClientTest, WebJobsDestructionWithQueuedLoginDoesNotOpenOrCloseQueue) {
+  {
+    Ao3WebJobs jobs;
+    ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Login, "Reader", "password"));
+  }
+  EXPECT_TRUE(ao3test::requests.empty());
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, WebJobsUnsignedBookmarksFinishWithoutOpeningQueue) {
+  Ao3WebJobs jobs;
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Bookmarks));
+  jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_EQ(jobs.status().error, Ao3Client::Error::SignIn);
+  EXPECT_TRUE(ao3test::requests.empty());
+}
+TEST_F(Ao3ClientTest, WebJobsSnapshotFailureFinishesBeforeQueueIsOpened) {
+  ao3test::responses.push_back({200, epub()});
+  ASSERT_TRUE(client.download(work));
+  ao3test::failWriteSuffix = "ao3-update-queue.txt";
+  Ao3WebJobs jobs;
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Updates));
+  jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_EQ(jobs.status().error, Ao3Client::Error::StorageError);
+  EXPECT_FALSE(Storage.exists(Ao3Client::UPDATE_QUEUE));
+  EXPECT_EQ(contents("/AO3/123.epub"), epub());
+}
 }  // namespace

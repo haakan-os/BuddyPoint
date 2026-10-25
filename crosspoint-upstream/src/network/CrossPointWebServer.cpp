@@ -103,6 +103,10 @@ void CrossPointWebServer::begin() {
     return;
   }
 
+  // Transfer buffers are released while the secure AO3 panel owns the network.
+  upload.buffer.resize(UploadState::UPLOAD_BUFFER_SIZE);
+  fontUpload.buffer.resize(FontUploadState::BUFFER_SIZE);
+
   // Check if we have a valid network connection (either STA connected or AP mode)
   const wifi_mode_t wifiMode = WiFi.getMode();
   const bool isStaConnected = (wifiMode & WIFI_MODE_STA) && (WiFi.status() == WL_CONNECTED);
@@ -261,6 +265,7 @@ void CrossPointWebServer::stop() {
   ao3Server.reset();
   discardHttpUpload(upload);
   if (!running || !server) {
+    running = false;
     LOG_DBG("WEB", "stop() called but already stopped (running=%d, server=%p)", running, server.get());
     return;
   }
@@ -311,15 +316,32 @@ bool CrossPointWebServer::enableAo3() {
   if (ao3Server) return true;
   if (apMode || WiFi.status() != WL_CONNECTED || upload.inProgress || wsUploadInProgress || fontUpload.file)
     return false;
-  // TLS identity and queued jobs exceed the activity stack budget.
+  // Stop HTTP/WebDAV/WebSocket listeners and release their routes and 8 KiB of
+  // transfer buffers before allocating the secure panel on devices without PSRAM.
+  stop();
+  std::vector<uint8_t>().swap(upload.buffer);
+  std::vector<uint8_t>().swap(fontUpload.buffer);
+  LOG_INF("AO3WEB", "After releasing file transfer: free heap %u, largest block %u", ESP.getFreeHeap(),
+          ESP.getMaxAllocHeap());
   auto candidate = makeUniqueNoThrow<Ao3WebServer>();
-  if (!candidate || !candidate->begin(WiFi.localIP().toString().c_str())) return false;
+  if (!candidate || !candidate->begin(WiFi.localIP().toString().c_str())) {
+    candidate.reset();
+    begin();
+    return false;
+  }
   ao3Server = std::move(candidate);
+  running = true;
   return true;
 }
 
+void CrossPointWebServer::disableAo3() {
+  if (!ao3Server) return;
+  stop();
+  begin();
+}
+
 void CrossPointWebServer::handleClient() {
-  if (running && ao3Server && ao3Server->busy() && !upload.inProgress && !wsUploadInProgress && !fontUpload.file) {
+  if (running && ao3Server) {
     ao3Server->tick();
     return;
   }

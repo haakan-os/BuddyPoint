@@ -3,7 +3,7 @@
 #include <algorithm>
 
 Ao3WebJobs::Ao3WebJobs() {
-  works.reserve(ao3::PAGE_SIZE);
+  // fetchList transfers the parser's reserved vector only when bookmarks are requested.
   client.loadSession();
   state.signedIn = client.signedIn();
   state.account = client.account();
@@ -11,7 +11,7 @@ Ao3WebJobs::Ao3WebJobs() {
 }
 Ao3WebJobs::~Ao3WebJobs() {
   std::fill(loginPassword.begin(), loginPassword.end(), '\0');
-  queue.close();
+  if (queue) queue.close();
   if (started && state.job == Job::Updates) Storage.remove(Ao3Client::UPDATE_QUEUE);
 }
 bool Ao3WebJobs::enqueue(Job job, std::string user, std::string password) {
@@ -53,9 +53,11 @@ bool Ao3WebJobs::progress(void* context, size_t bytes, size_t total) {
   return !self->cancelled.load();
 }
 void Ao3WebJobs::finish(Ao3Client::Error error) {
-  queue.close();
+  if (queue) queue.close();
   if (started && state.job == Job::Updates) Storage.remove(Ao3Client::UPDATE_QUEUE);
-  works.clear();
+  std::vector<ao3::Work>().swap(works);
+  remote = {};
+  prior = {};
   next.clear();
   std::lock_guard<std::mutex> lock(mutex);
   std::fill(loginPassword.begin(), loginPassword.end(), '\0');
@@ -104,6 +106,8 @@ void Ao3WebJobs::process(const std::string& id) {
     else
       ++state.saved;
   }
+  remote = {};
+  prior = {};
   if (!ok && (error == Ao3Client::Error::SignIn || error == Ao3Client::Error::RateLimit ||
               error == Ao3Client::Error::Cancelled || error == Ao3Client::Error::Memory ||
               error == Ao3Client::Error::StorageError))
@@ -165,6 +169,13 @@ void Ao3WebJobs::tick() {
       if (!client.fetchList(url, true, works, next)) {
         finish(client.error());
         return;
+      }
+      // The web sync needs only IDs; release list metadata before the next
+      // browser handshake or work request on the constrained heap.
+      for (auto& work : works) {
+        auto id = std::move(work.id);
+        work = {};
+        work.id = std::move(id);
       }
       if (next == url) {
         finish(Ao3Client::Error::Parse);

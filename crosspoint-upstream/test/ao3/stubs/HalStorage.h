@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <set>
@@ -36,7 +37,12 @@ class Print {
 };
 class HalFile {
  public:
+  void initialize() {
+    initialized = true;
+    opened = false;
+  }
   void open(const std::string& name) {
+    initialize();
     path = name;
     offset = 0;
     opened = true;
@@ -98,6 +104,8 @@ class HalFile {
     return count;
   }
   bool close() {
+    // Match the firmware HAL even when host tests compile with NDEBUG.
+    if (!initialized) std::abort();
     opened = false;
     return !ao3test::failClose;
   }
@@ -105,6 +113,7 @@ class HalFile {
  private:
   std::string path;
   size_t offset = 0;
+  bool initialized = false;
   bool opened = false;
   bool directory = false;
   std::vector<std::string> children;
@@ -113,6 +122,7 @@ class HalStorage {
  public:
   HalFile open(const char* path) {
     HalFile file;
+    file.initialize();
     if (ao3test::aliases.contains(path))
       file.open(ao3test::aliases.at(path));
     else if (exists(path))
@@ -120,6 +130,7 @@ class HalStorage {
     return file;
   }
   bool openFileForRead(const char*, const std::string& path, HalFile& file) {
+    file.initialize();
     if (!ao3test::files.contains(path)) return false;
     file.open(path);
     return true;
