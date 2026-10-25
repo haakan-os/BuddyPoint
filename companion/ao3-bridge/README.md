@@ -88,7 +88,9 @@ left intact. The optimiser does not rewrite chapter structure or strip assets.
 
 The original and optimised EPUB are both cached. Work metadata/download URL
 changes create a new cache version; changing the optimiser version creates a new
-optimised copy. `OPTIMIZE_EPUB=false` serves originals. Cached private works are
+optimised copy. `OPTIMIZE_EPUB=false` serves originals. The reader's update check
+also compares this optimisation revision, so switching profiles replaces its copy
+even when the AO3 chapter count is unchanged. Cached private works are
 revalidated against AO3 when preparing a download. Old cache versions are retained
 until you remove them from the data volume with the bridge stopped.
 

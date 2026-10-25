@@ -40,6 +40,7 @@ struct Work {
   std::string tags;
   std::string updated;
   std::string download;
+  std::string sourceRevision;
   uint32_t words = 0;
   uint32_t chapters = 0;
   uint32_t totalChapters = 0;

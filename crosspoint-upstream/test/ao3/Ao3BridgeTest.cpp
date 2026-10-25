@@ -72,11 +72,14 @@ TEST_F(Ao3BridgeTest, CorruptSavedConfigurationDoesNotEnableDirectAo3) {
 }
 TEST_F(Ao3BridgeTest, WorkJobPollsOnSelectedNetworkAndUsesBearerHeader) {
   bridge.config.setNetwork("Home", "https://bridge.example");
-  accepted(R"({"id":"123","title":"Private fic","chapters":2,"total":3})");
+  accepted(
+      R"({"id":"123","title":"Private fic","chapters":2,"total":3,"profile":"x3-images-v1","download":"https://archiveofourown.org/downloads/123/work.epub?updated_at=42"})");
   ao3::Work work;
   ASSERT_TRUE(bridge.fetchWork("123", work));
   EXPECT_EQ(work.title, "Private fic");
   EXPECT_EQ(work.chapters, 2U);
+  EXPECT_EQ(work.sourceRevision, "x3-images-v1");
+  EXPECT_EQ(work.download, "https://archiveofourown.org/downloads/123/work.epub?updated_at=42");
   for (const auto& request : ao3test::requests) {
     EXPECT_TRUE(request.url.starts_with("https://bridge.example/api/v1/"));
     EXPECT_EQ(request.headers.at("Authorization"), "Bearer " + bridge.config.token);

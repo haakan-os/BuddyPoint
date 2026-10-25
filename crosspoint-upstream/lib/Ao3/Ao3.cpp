@@ -236,6 +236,7 @@ bool changed(const Work& downloaded, const Work& remote) {
   return downloaded.id == remote.id &&
          (downloaded.updated != remote.updated || downloaded.chapters != remote.chapters ||
           downloaded.words != remote.words || downloaded.totalChapters != remote.totalChapters ||
+          downloaded.sourceRevision != remote.sourceRevision ||
           (!downloaded.download.empty() && !remote.download.empty() && downloaded.download != remote.download));
 }
 bool Cookies::prepare() {

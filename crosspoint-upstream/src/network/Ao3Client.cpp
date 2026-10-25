@@ -503,6 +503,7 @@ bool Ao3Client::saveWork(const ao3::Work& work) {
   doc["warnings"] = work.warnings;
   doc["tags"] = work.tags;
   doc["download"] = work.download;
+  doc["source_revision"] = work.sourceRevision;
   return writeDocument(recordPath(work.id), doc);
 }
 bool Ao3Client::readDownloaded(const std::string& id, ao3::Work& work) {
@@ -522,6 +523,7 @@ bool Ao3Client::readDownloaded(const std::string& id, ao3::Work& work) {
   work.warnings = std::string(doc["warnings"] | "").substr(0, 384);
   work.tags = std::string(doc["tags"] | "").substr(0, 192);
   work.download = std::string(doc["download"] | "").substr(0, 2048);
+  work.sourceRevision = std::string(doc["source_revision"] | "").substr(0, 64);
   work.chapters = doc["chapters"] | 0U;
   work.totalChapters = doc["total"] | 0U;
   work.words = doc["words"] | 0U;

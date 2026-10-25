@@ -229,6 +229,7 @@ bool Ao3Activity::progress(void* context, size_t bytes, size_t total) {
     self->lastPaint = millis();
     {
       RenderLock lock;
+      if (bytes && self->status == tr(STR_AO3_BRIDGE_PREPARING)) self->status = tr(STR_DOWNLOADING);
       self->progressText = total ? std::to_string(static_cast<uint64_t>(bytes) * 100 / total) + "%"
                                  : std::to_string(bytes / 1024) + " KB";
       if (self->processed) self->progressText += " · " + std::to_string(self->processed) + " " + tr(STR_AO3_CHECKED);
@@ -242,7 +243,9 @@ void Ao3Activity::schedule(Job job) {
   cancelled = homeAfterCancel = false;
   {
     RenderLock lock;
-    status = job == Job::Login ? tr(STR_AO3_SIGNING_IN) : job == Job::Download ? tr(STR_DOWNLOADING) : tr(STR_LOADING);
+    status = job == Job::Login      ? tr(STR_AO3_SIGNING_IN)
+             : job == Job::Download ? (client.usesBridge() ? tr(STR_AO3_BRIDGE_PREPARING) : tr(STR_DOWNLOADING))
+                                    : tr(STR_LOADING);
     progressText.clear();
   }
   show(View::Busy);

@@ -240,7 +240,7 @@ bool Ao3Bridge::transfer(const std::string& path, JsonDocument* result, HalFile*
   size_t received = 0;
   lastData = millis();
   while (true) {
-    if (!pulse(received, length > 0 ? length : 0)) return false;
+    if (!pulse(file ? received : 0, file && length > 0 ? length : 0)) return false;
     if (millis() - lastData >= 30000) {
       error = ao3::Error::Timeout;
       return false;
@@ -329,6 +329,8 @@ bool Ao3Bridge::readWork(JsonVariantConst value, ao3::Work& work) {
   work.warnings = std::string(value["warnings"] | "").substr(0, 384);
   work.tags = std::string(value["tags"] | "").substr(0, 192);
   work.updated = std::string(value["updated"] | "").substr(0, 32);
+  work.download = std::string(value["download"] | "").substr(0, 2048);
+  work.sourceRevision = std::string(value["profile"] | "").substr(0, 64);
   work.chapters = value["chapters"] | 0U;
   work.totalChapters = value["total"] | 0U;
   work.words = value["words"] | 0U;

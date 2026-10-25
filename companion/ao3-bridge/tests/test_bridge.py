@@ -233,6 +233,7 @@ class HttpTest(unittest.TestCase):
         with self.request('/api/v1/jobs/' + identifier) as response:
             result = json.load(response)["result"]
             self.assertNotIn('file', result)
+            self.assertEqual(result['work']['profile'], self.service.profile)
         with self.request(result['path']) as response:
             data = response.read()
             self.assertEqual(len(data), int(response.headers['Content-Length']))

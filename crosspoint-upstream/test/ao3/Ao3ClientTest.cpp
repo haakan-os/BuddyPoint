@@ -542,6 +542,17 @@ TEST_F(Ao3ClientTest, BridgeDownloadPublishesPreparedMetadataAndNeverContactsAo3
     EXPECT_FALSE(request.headers.contains("Cookie"));
   }
 }
+TEST_F(Ao3ClientTest, OptimizationProfileSurvivesStorageAndTriggersAnUpdate) {
+  work.sourceRevision = "original";
+  ao3test::responses.emplace_back(200, epub());
+  ASSERT_TRUE(client.download(work));
+  ao3::Work saved;
+  ASSERT_TRUE(client.readDownloaded(work.id, saved));
+  EXPECT_EQ(saved.sourceRevision, "original");
+  EXPECT_FALSE(ao3::changed(saved, work));
+  work.sourceRevision = "x3-images-v1";
+  EXPECT_TRUE(ao3::changed(saved, work));
+}
 }  // namespace
 
 TEST_F(Ao3ClientTest, LoginRecognizesCurrentAo3NavigationWithoutWaitingForPageTails) {

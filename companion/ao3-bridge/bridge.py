@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import requests
 from ao3 import Ao3, BridgeError, work_id
+from optimizer import OPTIMIZER_VERSION
 
 
 class Service:
@@ -34,6 +35,7 @@ class Service:
         self.lock = threading.Lock()
         self.queue = queue.Queue(maxsize=8)
         self.optimize = os.environ.get("OPTIMIZE_EPUB", "true").lower() != "false"
+        self.profile = OPTIMIZER_VERSION if self.optimize else "original"
         self.worker = threading.Thread(target=self.run, daemon=True)
         self.worker.start()
 
@@ -69,10 +71,14 @@ class Service:
                     result = self.client.logout()
                 elif operation == "list":
                     result = self.client.listing(args["url"])
+                    for work in result["works"]:
+                        work["profile"] = self.profile
                 elif operation == "work":
                     result = self.client.work(args["id"])
+                    result["profile"] = self.profile
                 else:
                     result = self.client.prepare(args["id"], self.optimize)
+                    result["work"]["profile"] = self.profile
                     result["path"] = "/api/v1/files/" + identifier
                     result["owner"] = self.client.username
                 with self.lock:
