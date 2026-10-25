@@ -32,6 +32,7 @@ struct Response {
   std::vector<std::pair<std::string, std::string>> headers;
   bool complete = true;
   bool connect = true;
+  bool headersComplete = true;
   Response(int status, std::string body, std::vector<std::pair<std::string, std::string>> headers = {},
            bool complete = true, bool connect = true)
       : status(status), body(std::move(body)), headers(std::move(headers)), complete(complete), connect(connect) {}
@@ -88,7 +89,7 @@ inline int64_t esp_http_client_fetch_headers(esp_http_client_handle_t h) {
     esp_http_client_event_t event{HTTP_EVENT_ON_HEADER, h->config.user_data, name.data(), value.data()};
     h->config.event_handler(&event);
   }
-  return h->response.body.size();
+  return h->response.headersComplete ? static_cast<int64_t>(h->response.body.size()) : -1;
 }
 inline int esp_http_client_get_status_code(esp_http_client_handle_t h) { return h->response.status; }
 inline int esp_http_client_read(esp_http_client_handle_t h, char* out, int length) {

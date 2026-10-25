@@ -5,8 +5,7 @@
 
 #include "Ao3Client.h"
 
-// HTTP handlers enqueue only. All account/SD/network work runs on the activity
-// task; the HTTPS task can keep serving status and cancellation during TLS I/O.
+// HTTP handlers enqueue only. Account/SD/network work runs on the activity task.
 class Ao3WebJobs {
  public:
   enum class Job { None, Login, Forget, Bookmarks, Updates };
@@ -23,6 +22,8 @@ class Ao3WebJobs {
   void cancel() { cancelled = true; }
   Status status() const;
   bool busy() const;
+  bool loginPending() const;
+  bool takeLogin(std::string& user, std::string& password);
   void tick();
   void setObserver(void (*callback)(void*), void* context) {
     observer = callback;

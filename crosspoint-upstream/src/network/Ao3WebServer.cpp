@@ -230,7 +230,7 @@ void Ao3WebServer::stopListener() {
   }
 }
 void Ao3WebServer::tick() {
-  if (listenerFailed || !jobs.busy() || handlingRequest.load() ||
+  if (listenerFailed || !jobs.busy() || jobs.loginPending() || handlingRequest.load() ||
       static_cast<long>(millis() - startNotBefore.load()) < 0)
     return;
   // Stop waits for the HTTPS task and all incoming sockets to close. Keep the
@@ -246,6 +246,15 @@ void Ao3WebServer::tick() {
   // Give polling/cancel requests a window between works. Their replies also
   // defer the next job tick until the response has been sent.
   startNotBefore = millis() + 3000;
+}
+bool Ao3WebServer::takeLogin(std::string& user, std::string& password) {
+  if (!jobs.loginPending() || handlingRequest.load() || static_cast<long>(millis() - startNotBefore.load()) < 0)
+    return false;
+  // Finish sending the acknowledgement and release incoming TLS before handing
+  // credentials to the device activity. The panel is not restarted after this.
+  LOG_INF("AO3WEB", "Closing panel for device sign-in");
+  stopListener();
+  return jobs.takeLogin(user, password);
 }
 esp_err_t Ao3WebServer::handle(httpd_req_t* request) {
   auto* self = static_cast<Ao3WebServer*>(request->user_ctx);
@@ -343,5 +352,6 @@ esp_err_t Ao3WebServer::route(httpd_req_t* request) {
   }
   doc.clear();
   doc["accepted"] = true;
+  if (path == "/api/login") doc["continueOnReader"] = true;
   return json(request, "202 Accepted", doc);
 }

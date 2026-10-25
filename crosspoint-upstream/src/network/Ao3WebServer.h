@@ -17,6 +17,7 @@ class Ao3WebServer {
   bool begin(const std::string& ip);
   void stop();
   void tick();
+  bool takeLogin(std::string& user, std::string& password);
   void cancel() { jobs.cancel(); }
   bool busy() const { return jobs.busy(); }
   bool failed() const { return listenerFailed.load(); }

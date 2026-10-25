@@ -42,6 +42,21 @@ bool Ao3WebJobs::busy() const {
   std::lock_guard<std::mutex> lock(mutex);
   return state.busy;
 }
+bool Ao3WebJobs::loginPending() const {
+  std::lock_guard<std::mutex> lock(mutex);
+  return state.busy && state.job == Job::Login && !cancelled;
+}
+bool Ao3WebJobs::takeLogin(std::string& user, std::string& password) {
+  std::lock_guard<std::mutex> lock(mutex);
+  if (!state.busy || state.job != Job::Login || cancelled) return false;
+  user = std::move(loginUser);
+  std::fill(password.begin(), password.end(), '\0');
+  password = std::move(loginPassword);
+  state.busy = false;
+  state.job = Job::None;
+  state.phase = "Continue on reader";
+  return true;
+}
 bool Ao3WebJobs::progress(void* context, size_t bytes, size_t total) {
   auto* self = static_cast<Ao3WebJobs*>(context);
   {
@@ -120,15 +135,8 @@ void Ao3WebJobs::tick() {
     finish(Ao3Client::Error::Cancelled);
     return;
   }
-  if (current.job == Job::Login) {
-    {
-      std::lock_guard<std::mutex> lock(mutex);
-      state.phase = "Signing in";
-    }
-    const bool ok = client.signIn(loginUser, loginPassword);
-    finish(ok ? Ao3Client::Error::None : client.error());
-    return;
-  }
+  // Login belongs to the device activity, after the web server is destroyed.
+  if (current.job == Job::Login) return;
   if (current.job == Job::Forget) {
     const bool ok = client.signOut();
     finish(ok ? Ao3Client::Error::None : client.error());

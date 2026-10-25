@@ -335,10 +335,20 @@ TEST_F(Ao3ClientTest, WebJobsQueueLoginWithoutSavingPasswordAndRejectOverlap) {
   EXPECT_TRUE(ao3test::requests.empty());
   EXPECT_FALSE(jobs.enqueue(Ao3WebJobs::Job::Updates));
   jobs.tick();
+  EXPECT_TRUE(jobs.loginPending());
+  EXPECT_TRUE(ao3test::requests.empty());
+  EXPECT_TRUE(ao3test::files.empty());
+  std::string user, password;
+  ASSERT_TRUE(jobs.takeLogin(user, password));
   EXPECT_FALSE(jobs.busy());
-  EXPECT_TRUE(jobs.status().signedIn);
-  EXPECT_EQ(jobs.status().account, "Reader");
-  EXPECT_EQ(jobs.status().error, Ao3Client::Error::None);
+  EXPECT_FALSE(jobs.loginPending());
+  EXPECT_EQ(user, "Reader");
+  EXPECT_EQ(password, "secret-password");
+  EXPECT_FALSE(jobs.takeLogin(user, password));
+  jobs.tick();
+  EXPECT_TRUE(ao3test::requests.empty());
+  ASSERT_TRUE(client.signIn(user, password));
+  EXPECT_TRUE(client.signedIn());
   for (const auto& [path, data] : ao3test::files) EXPECT_EQ(contents(path).find("secret-password"), std::string::npos);
   ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Forget));
   jobs.tick();
@@ -349,11 +359,32 @@ TEST_F(Ao3ClientTest, WebJobsCancellationBeforeLoginMakesNoNetworkRequest) {
   Ao3WebJobs jobs;
   ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Login, "Reader", "password"));
   jobs.cancel();
+  std::string user, password;
+  EXPECT_FALSE(jobs.loginPending());
+  EXPECT_FALSE(jobs.takeLogin(user, password));
   jobs.tick();
   EXPECT_FALSE(jobs.busy());
   EXPECT_EQ(jobs.status().error, Ao3Client::Error::Cancelled);
   EXPECT_TRUE(ao3test::requests.empty());
   EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, LoginRejectsIncompleteHeadersEvenIfStatusAndBodyLookSuccessful) {
+  ao3test::responses.push_back({200, "<input name='authenticity_token' value='csrf'>"});
+  ao3test::responses.back().headersComplete = false;
+  EXPECT_FALSE(client.signIn("Reader", "password"));
+  EXPECT_EQ(client.error(), Ao3Client::Error::Network);
+  ASSERT_EQ(ao3test::requests.size(), 1U);
+  EXPECT_EQ(ao3test::requests[0].method, 0);
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, WebJobsCannotHandOffNonLoginJobs) {
+  Ao3WebJobs jobs;
+  std::string user, password;
+  EXPECT_FALSE(jobs.takeLogin(user, password));
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Updates));
+  EXPECT_FALSE(jobs.loginPending());
+  EXPECT_FALSE(jobs.takeLogin(user, password));
+  EXPECT_TRUE(jobs.busy());
 }
 TEST_F(Ao3ClientTest, WebJobsPrivateBookmarksDownloadAndThenSkipUnchangedFics) {
   login();

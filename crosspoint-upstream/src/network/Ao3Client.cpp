@@ -174,16 +174,27 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
       esp_http_client_set_header(http, "Origin", ao3::ORIGIN);
       esp_http_client_set_header(http, "Referer", "https://archiveofourown.org/users/login");
     }
-    if (esp_http_client_open(http, post ? post->size() : 0) != ESP_OK) {
+    LOG_INF("AO3", "Request hop %u: connecting (%s), heap %u, largest %u", hop + 1, post ? "POST" : "GET",
+            ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+    const auto opened = esp_http_client_open(http, post ? post->size() : 0);
+    if (opened != ESP_OK) {
+      LOG_ERR("AO3", "Connection failed: %d", opened);
       lastError = Error::Network;
       return false;
     }
+    LOG_INF("AO3", "Connected; sending request and waiting for headers");
     if (post && esp_http_client_write(http, post->data(), post->size()) != static_cast<int>(post->size())) {
       lastError = Error::Network;
       return false;
     }
     const auto length = esp_http_client_fetch_headers(http);
     const int status = esp_http_client_get_status_code(http);
+    LOG_INF("AO3", "Response headers: status %d, length %lld, heap %u", status, static_cast<long long>(length),
+            ESP.getFreeHeap());
+    if (length < 0) {
+      lastError = Error::Network;
+      return false;
+    }
     if (headers.invalidCookie) {
       lastError = Error::SignIn;
       return false;
@@ -234,6 +245,7 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
       }
     }
     if (!esp_http_client_is_complete_data_received(http) || received == 0) {
+      LOG_ERR("AO3", "Incomplete response: %u bytes", static_cast<unsigned>(received));
       lastError = Error::Network;
       return false;
     }
@@ -241,6 +253,7 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
       lastError = parser->loginForm ? Error::SignIn : Error::Parse;
       return false;
     }
+    LOG_INF("AO3", "Response complete: %u bytes", static_cast<unsigned>(received));
     return true;
   }
   lastError = Error::Network;
@@ -290,6 +303,7 @@ bool Ao3Client::signOut() {
   return true;
 }
 bool Ao3Client::signIn(const std::string& user, const std::string& password) {
+  LOG_INF("AO3", "Sign-in: requesting login form");
   if (user.empty() || user.size() > 80 || password.empty() || password.size() > 256) {
     lastError = Error::SignIn;
     return false;
@@ -311,6 +325,7 @@ bool Ao3Client::signIn(const std::string& user, const std::string& password) {
     lastError = Error::Memory;
     return false;
   }
+  LOG_INF("AO3", "Sign-in: submitting form");
   const bool fetched = request(std::string(ao3::ORIGIN) + "/users/login", parser.get(), nullptr, &payload);
   std::fill(payload.begin(), payload.end(), '\0');
   if (!fetched || !parser->signedIn || cookies.header().empty()) {
@@ -319,6 +334,7 @@ bool Ao3Client::signIn(const std::string& user, const std::string& password) {
     return false;
   }
   username = user;
+  LOG_INF("AO3", "Sign-in: saving session");
   return saveSession();
 }
 bool Ao3Client::fetchWork(const std::string& id, ao3::Work& work) {

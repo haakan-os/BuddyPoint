@@ -9,7 +9,8 @@
 
 class Ao3Activity final : public UiListActivity {
  public:
-  Ao3Activity(GfxRenderer& renderer, MappedInputManager& input);
+  Ao3Activity(GfxRenderer& renderer, MappedInputManager& input, std::string user = {}, std::string password = {});
+  ~Ao3Activity() override;
   void onEnter() override;
   void onExit() override;
   bool preventAutoSleep() override;

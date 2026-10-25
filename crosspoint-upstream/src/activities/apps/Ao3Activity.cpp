@@ -42,17 +42,25 @@ std::string chapterLabel(const ao3::Work& work) {
 }
 }  // namespace
 
-Ao3Activity::Ao3Activity(GfxRenderer& renderer, MappedInputManager& input) : UiListActivity("AO3", renderer, input) {
+Ao3Activity::Ao3Activity(GfxRenderer& renderer, MappedInputManager& input, std::string user, std::string password)
+    : UiListActivity("AO3", renderer, input), loginUser(std::move(user)), loginPassword(std::move(password)) {
   labels.reserve(rows.size());
-  works.reserve(ao3::PAGE_SIZE);
   subtitles.reserve(ao3::PAGE_SIZE);
   client.setProgress(progress, this);
 }
+Ao3Activity::~Ao3Activity() { std::fill(loginPassword.begin(), loginPassword.end(), '\0'); }
 void Ao3Activity::onEnter() {
-  client.loadSession();
+  const bool incomingLogin = !loginUser.empty() && !loginPassword.empty();
+  if (!incomingLogin) client.loadSession();
   UiListActivity::onEnter();
   app.on(ACTION_CANCEL, cancelAction, this);
-  show(View::Menu);
+  if (incomingLogin) {
+    // File Transfer hands over its existing WiFi connection with the credentials.
+    wifiStarted = true;
+    schedule(Job::Login);
+  } else {
+    show(View::Menu);
+  }
 }
 void Ao3Activity::onExit() {
   std::fill(loginPassword.begin(), loginPassword.end(), '\0');
@@ -207,7 +215,7 @@ void Ao3Activity::schedule(Job job) {
   cancelled = homeAfterCancel = false;
   {
     RenderLock lock;
-    status = job == Job::Download ? tr(STR_DOWNLOADING) : tr(STR_LOADING);
+    status = job == Job::Login ? tr(STR_AO3_SIGNING_IN) : job == Job::Download ? tr(STR_DOWNLOADING) : tr(STR_LOADING);
     progressText.clear();
   }
   show(View::Busy);
@@ -291,6 +299,7 @@ void Ao3Activity::execute(Job job) {
     const bool ok = client.signIn(loginUser, loginPassword);
     std::fill(loginPassword.begin(), loginPassword.end(), '\0');
     loginPassword.clear();
+    LOG_INF("AO3", "Device sign-in finished: success %d, error %u", ok, static_cast<unsigned>(client.error()));
     if (ok)
       showMessage(tr(STR_AO3_SIGNED_IN));
     else

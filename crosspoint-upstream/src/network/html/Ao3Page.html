@@ -17,7 +17,7 @@
 </head>
 <body>
   <h1>AO3 Account</h1>
-  <p class="muted">BuddyPoint · Keep File Transfer open on your reader while using this panel.</p>
+  <p class="muted">Enter your login details here, then continue on your reader.</p>
   <section class="card" id="pairCard">
     <h2>Connect to your reader</h2>
     <p>Check this site's SHA-256 certificate fingerprint against the reader's AO3 screen before entering the code. The code changes when you leave and reopen AO3 mode.</p>
@@ -29,27 +29,15 @@
   </section>
   <section class="card" id="accountCard" hidden>
     <h2>Your AO3 account</h2>
-    <p id="accountStatus" class="status" aria-live="polite"></p>
     <form id="loginForm">
       <label for="username">AO3 username</label>
       <input id="username" name="username" autocomplete="username" maxlength="80" required>
       <label for="password">Password</label>
       <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
-      <button id="loginButton" type="submit">Sign in to AO3</button>
+      <button id="loginButton" type="submit">Send to reader</button>
     </form>
     <p class="muted">Your password is used for sign-in and is not saved on the reader. The reader remembers an AO3 session for private bookmarks and account-only works.</p>
-    <div class="actions">
-      <button id="bookmarksButton" type="button">Download bookmarked fics</button>
-      <button id="updatesButton" type="button">Update downloaded fics</button>
-      <button id="forgetButton" type="button" class="secondary">Forget AO3 sign-in</button>
-    </div>
-  </section>
-  <section class="card" id="jobCard" hidden>
-    <h2>Activity</h2>
-    <p id="jobStatus" class="status" aria-live="polite">Ready</p>
-    <progress id="progress" max="100" value="0" hidden></progress>
-    <button id="cancelButton" type="button" class="secondary" disabled>Cancel job</button>
-    <p class="muted">Completed downloads stay in /AO3. File Transfer is paused in AO3 mode. Status refreshes and browser cancellation take effect between AO3 requests. Keep this tab open to send a queued cancellation; press Back on the reader to stop during a download.</p>
+    <p>The reader will close this panel and open its AO3 app to sign in. Follow progress and any errors on the reader. Use its AO3 menu to download bookmarks, update fics or forget the saved account.</p>
   </section>
   <p id="message" role="status" aria-live="polite"></p>
 </body>

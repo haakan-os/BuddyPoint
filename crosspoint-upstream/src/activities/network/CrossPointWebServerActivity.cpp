@@ -14,6 +14,7 @@
 #include "NetworkModeSelectionActivity.h"
 #include "SilentRestart.h"
 #include "WifiSelectionActivity.h"
+#include "activities/apps/Ao3Activity.h"
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -108,6 +109,9 @@ void CrossPointWebServerActivity::onExit() {
   if (webServer) webServer->stop();
   stopDnsServer();
   MDNS.end();
+
+  // The AO3 activity owns the connected WiFi after a credential handoff.
+  if (handoffToAo3) return;
 
   // Skip reboot if WiFi was never activated (e.g. user backed out of mode selection).
   if (WiFi.getMode() != WIFI_MODE_NULL) {
@@ -373,6 +377,7 @@ void CrossPointWebServerActivity::loop() {
       constexpr int MAX_ITERATIONS = 500;
       for (int i = 0; i < MAX_ITERATIONS && webServer->isRunning(); i++) {
         webServer->handleClient();
+        if (handoffAo3Login()) return;
         if (webServer->ao3() && webServer->ao3()->failed() && !ao3Unavailable) {
           {
             RenderLock lock;
@@ -546,13 +551,37 @@ void CrossPointWebServerActivity::renderWifiIndicator(int subHeaderTop) const {
   }
 }
 
+bool CrossPointWebServerActivity::handoffAo3Login() {
+  if (!webServer->ao3()) return false;
+  std::string user, password;
+  if (!webServer->ao3()->takeLogin(user, password)) return false;
+  {
+    RenderLock lock;
+    webServer->stop();
+    webServer.reset();
+    ao3Unavailable = true;
+  }
+  // Allocate the normal device UI only after releasing all web/TLS state.
+  auto activity = makeUniqueNoThrow<Ao3Activity>(renderer, mappedInput, std::move(user), std::move(password));
+  std::fill(password.begin(), password.end(), '\0');
+  if (!activity) {
+    LOG_ERR("AO3WEB", "OOM: device AO3 activity");
+    requestUpdate();
+    return true;
+  }
+  LOG_INF("AO3WEB", "Device sign-in handoff: free heap %u, largest block %u", ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  handoffToAo3 = true;
+  activityManager.replaceActivity(std::move(activity));
+  return true;
+}
+
 bool CrossPointWebServerActivity::handleServerInput() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasHomeGesture()) {
     if (webServer && webServer->ao3()) webServer->ao3()->cancel();
     onGoHome();
     return true;
   }
-  if (!isApMode && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+  if (webServer && !isApMode && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     {
       RenderLock lock;
       if (showAo3) {
@@ -586,7 +615,7 @@ void CrossPointWebServerActivity::renderAo3Pairing() const {
   int y = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
   const int line = renderer.getLineHeight(UI_10_FONT_ID) + 4;
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_AO3_WEB_TITLE), nullptr);
-  if (ao3Unavailable || !webServer->ao3()) {
+  if (ao3Unavailable || !webServer || !webServer->ao3()) {
     renderer.drawCenteredText(SMALL_FONT_ID, y, tr(STR_AO3_WEB_UNAVAILABLE));
   } else {
     const auto* ao3 = webServer->ao3();
