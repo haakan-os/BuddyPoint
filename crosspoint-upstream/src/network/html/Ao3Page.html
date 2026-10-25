@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AO3 Account — BuddyPoint</title>
+  <style>
+    :root{color-scheme:light dark;--bg:#f5f5f5;--card:#fff;--text:#333;--muted:#666;--accent:#47765c;--line:#ddd}
+    @media(prefers-color-scheme:dark){:root{--bg:#333;--card:#444;--text:#f5f5f5;--muted:#ccc;--accent:#6e9a82;--line:#666}}
+    *{box-sizing:border-box}body{font-family:system-ui,sans-serif;max-width:800px;margin:auto;padding:20px;background:var(--bg);color:var(--text)}
+    h1{border-bottom:2px solid var(--accent);padding-bottom:12px}h2{margin-top:0}.card{background:var(--card);padding:22px;margin:18px 0;border-radius:8px;box-shadow:0 2px 4px #0002}
+    label{display:block;margin:14px 0 6px}input{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--text)}
+    button{font:inherit;padding:11px 16px;border:0;border-radius:4px;background:var(--accent);color:#fff;cursor:pointer;margin:12px 8px 0 0}button:disabled{opacity:.5;cursor:default}
+    .secondary{background:var(--bg);color:var(--text);border:1px solid var(--line)}.muted{color:var(--muted)}#message{white-space:pre-wrap;overflow-wrap:anywhere;min-height:24px}progress{width:100%;height:18px}[hidden]{display:none!important}
+    .actions{display:flex;flex-wrap:wrap}.status{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--accent)}
+  </style>
+  <script src="/ao3.js" defer></script>
+</head>
+<body>
+  <h1>AO3 Account</h1>
+  <p class="muted">BuddyPoint · Keep File Transfer open on your reader while using this panel.</p>
+  <section class="card" id="pairCard">
+    <h2>Connect to your reader</h2>
+    <p>Check this site's SHA-256 certificate fingerprint against the reader's AO3 screen before entering the code. The code changes when you reopen File Transfer.</p>
+    <form id="pairForm">
+      <label for="pairCode">Eight-digit code shown on the reader</label>
+      <input id="pairCode" name="pairing-code" inputmode="numeric" pattern="[0-9]{8}" minlength="8" maxlength="8" autocomplete="off" required>
+      <button id="pairButton" type="submit">Connect</button>
+    </form>
+  </section>
+  <section class="card" id="accountCard" hidden>
+    <h2>Your AO3 account</h2>
+    <p id="accountStatus" class="status" aria-live="polite"></p>
+    <form id="loginForm">
+      <label for="username">AO3 username</label>
+      <input id="username" name="username" autocomplete="username" maxlength="80" required>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" maxlength="256" required>
+      <button id="loginButton" type="submit">Sign in to AO3</button>
+    </form>
+    <p class="muted">Your password is used for sign-in and is not saved on the reader. The reader remembers an AO3 session for private bookmarks and account-only works.</p>
+    <div class="actions">
+      <button id="bookmarksButton" type="button">Download bookmarked fics</button>
+      <button id="updatesButton" type="button">Update downloaded fics</button>
+      <button id="forgetButton" type="button" class="secondary">Forget AO3 sign-in</button>
+    </div>
+  </section>
+  <section class="card" id="jobCard" hidden>
+    <h2>Activity</h2>
+    <p id="jobStatus" class="status" aria-live="polite">Ready</p>
+    <progress id="progress" max="100" value="0" hidden></progress>
+    <button id="cancelButton" type="button" class="secondary" disabled>Cancel job</button>
+    <p class="muted">Completed downloads stay in /AO3. File uploads wait while an AO3 job runs. Cancellation takes effect between network reads.</p>
+  </section>
+  <p id="message" role="status" aria-live="polite"></p>
+</body>
+</html>

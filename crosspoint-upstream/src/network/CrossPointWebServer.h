@@ -17,6 +17,8 @@ struct FileInfo {
   bool isDirectory;
 };
 
+class Ao3WebServer;
+
 class CrossPointWebServer {
  public:
   struct WsUploadStatus {
@@ -80,6 +82,8 @@ class CrossPointWebServer {
 
   // Call this periodically to handle client requests
   void handleClient();
+  bool enableAo3();
+  Ao3WebServer* ao3() const { return ao3Server.get(); }
 
   // Called on the serving task after each multipart upload event. A function
   // pointer avoids allocating a closure; the owner must outlive this server.
@@ -98,6 +102,7 @@ class CrossPointWebServer {
   uint16_t getPort() const { return port; }
 
  private:
+  std::unique_ptr<Ao3WebServer> ao3Server;
   void (*uploadObserver)(void*) = nullptr;
   void* uploadObserverContext = nullptr;
   void notifyUploadObserver() const {

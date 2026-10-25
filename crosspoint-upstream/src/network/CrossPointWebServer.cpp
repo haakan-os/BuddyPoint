@@ -15,13 +15,16 @@
 #include <algorithm>
 #include <cctype>
 
+#include "Ao3WebServer.h"
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
 #include "OpdsServerStore.h"
 #include "SdCardFontSystem.h"
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
+#include "WebPathPolicy.h"
 #include "WifiCredentialStore.h"
+#include "html/Ao3StartPageHtml.generated.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
@@ -168,6 +171,11 @@ void CrossPointWebServer::begin() {
   server->on("/delete", HTTP_POST, [this] { handleDelete(); });
 
   // Settings endpoints
+  server->on("/ao3", HTTP_GET, [this] {
+    server->sendHeader("Content-Encoding", "gzip");
+    server->sendHeader("Cache-Control", "no-store");
+    server->send_P(200, "text/html", Ao3StartPageHtml, sizeof(Ao3StartPageHtml));
+  });
   server->on("/settings", HTTP_GET, [this] { handleSettingsPage(); });
   server->on("/api/settings", HTTP_GET, [this] { handleGetSettings(); });
   server->on("/api/settings", HTTP_POST, [this] { handlePostSettings(); });
@@ -250,6 +258,7 @@ void CrossPointWebServer::abortWsUpload(const char* tag) {
 }
 
 void CrossPointWebServer::stop() {
+  ao3Server.reset();
   discardHttpUpload(upload);
   if (!running || !server) {
     LOG_DBG("WEB", "stop() called but already stopped (running=%d, server=%p)", running, server.get());
@@ -298,7 +307,23 @@ void CrossPointWebServer::stop() {
   LOG_DBG("WEB", "[MEM] Free heap final: %d bytes", ESP.getFreeHeap());
 }
 
+bool CrossPointWebServer::enableAo3() {
+  if (ao3Server) return true;
+  if (apMode || WiFi.status() != WL_CONNECTED || upload.inProgress || wsUploadInProgress || fontUpload.file)
+    return false;
+  // TLS identity and queued jobs exceed the activity stack budget.
+  auto candidate = makeUniqueNoThrow<Ao3WebServer>();
+  if (!candidate || !candidate->begin(WiFi.localIP().toString().c_str())) return false;
+  ao3Server = std::move(candidate);
+  return true;
+}
+
 void CrossPointWebServer::handleClient() {
+  if (running && ao3Server && ao3Server->busy() && !upload.inProgress && !wsUploadInProgress && !fontUpload.file) {
+    ao3Server->tick();
+    return;
+  }
+
   static unsigned long lastDebugPrint = 0;
 
   // Check running flag FIRST before accessing server
@@ -546,6 +571,11 @@ void CrossPointWebServer::handleFileListData() const {
     currentPath = normalizeWebPath(server->arg("path"));
   }
 
+  if (web_path::protectedPath(currentPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
+  }
+
   server->setContentLength(CONTENT_LENGTH_UNKNOWN);
   server->send(200, "application/json", "");
   server->sendContent("[");
@@ -588,6 +618,11 @@ void CrossPointWebServer::handleDownload() const {
   }
 
   String itemPath = normalizeWebPath(server->arg("path"));
+  if (web_path::protectedPath(itemPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
+  }
+
   if (itemPath.isEmpty() || itemPath == "/") {
     server->send(400, "text/plain", "Invalid path");
     return;
@@ -774,6 +809,11 @@ void CrossPointWebServer::handleUpload(UploadState& state) const {
     String filePath = state.path;
     if (!filePath.endsWith("/")) filePath += "/";
     filePath += state.fileName;
+    if (web_path::protectedPath(filePath.c_str())) {
+      state.error = "Cannot access system files";
+      state.inProgress = false;
+      return;
+    }
 
     const bool notesUpload = state.path == "/BuddyNotes" && FsHelpers::hasMarkdownExtension(state.fileName.c_str());
     if (notesUpload) {
@@ -943,6 +983,11 @@ void CrossPointWebServer::handleCreateFolder() const {
   if (!folderPath.endsWith("/")) folderPath += "/";
   folderPath += folderName;
 
+  if (web_path::protectedPath(folderPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
+  }
+
   LOG_DBG("WEB", "Creating folder: %s", folderPath.c_str());
 
   // Check if already exists
@@ -968,6 +1013,11 @@ void CrossPointWebServer::handleRename() const {
   }
 
   String itemPath = normalizeWebPath(server->arg("path"));
+  if (web_path::protectedPath(itemPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
+  }
+
   String newName = server->arg("name");
   newName.trim();
 
@@ -1024,6 +1074,11 @@ void CrossPointWebServer::handleRename() const {
   }
   newPath += newName;
 
+  if (web_path::protectedPath(newPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
+  }
+
   if (Storage.exists(newPath.c_str())) {
     file.close();
     server->send(409, "text/plain", "Target already exists");
@@ -1050,7 +1105,16 @@ void CrossPointWebServer::handleMove() const {
   }
 
   String itemPath = normalizeWebPath(server->arg("path"));
+  if (web_path::protectedPath(itemPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
+  }
+
   String destPath = normalizeWebPath(server->arg("dest"));
+  if (web_path::protectedPath(destPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
+  }
 
   if (itemPath.isEmpty() || itemPath == "/") {
     server->send(400, "text/plain", "Invalid path");
@@ -1117,6 +1181,12 @@ void CrossPointWebServer::handleMove() const {
     server->send(200, "text/plain", "Already in destination");
     return;
   }
+
+  if (web_path::protectedPath(newPath.c_str())) {
+    server->send(403, "text/plain", "Cannot access system files");
+    return;
+  }
+
   if (Storage.exists(newPath.c_str())) {
     file.close();
     server->send(409, "text/plain", "Target already exists");
@@ -1179,6 +1249,11 @@ void CrossPointWebServer::handleDelete() const {
 
   for (const auto& p : paths) {
     auto itemPath = normalizeWebPath(p.as<String>());
+    if (web_path::protectedPath(itemPath.c_str())) {
+      failedItems += itemPath + " (protected file); ";
+      allSuccess = false;
+      continue;
+    }
 
     // Validate path
     if (itemPath.isEmpty() || itemPath == "/") {
@@ -1764,6 +1839,10 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
           String filePath = wsUploadPath;
           if (!filePath.endsWith("/")) filePath += "/";
           filePath += wsUploadFileName;
+          if (web_path::protectedPath(filePath.c_str())) {
+            wsServer->sendTXT(num, "ERROR:Cannot access system files");
+            return;
+          }
 
           resetTaskWatchdogIfSubscribed();
           if (Storage.exists(filePath.c_str())) {

@@ -5,6 +5,7 @@
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Memory.h>
 #include <WiFi.h>
 
 #include <cstddef>
@@ -16,6 +17,7 @@
 #include "activities/network/CalibreConnectActivity.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "network/Ao3WebServer.h"
 #include "util/QrUtils.h"
 #include "util/TaskWatchdog.h"
 
@@ -103,6 +105,7 @@ void CrossPointWebServerActivity::onExit() {
   LOG_DBG("WEBACT", "Free heap at onExit start: %d bytes", ESP.getFreeHeap());
 
   state = WebServerActivityState::SHUTTING_DOWN;
+  if (webServer) webServer->stop();
   stopDnsServer();
   MDNS.end();
 
@@ -276,7 +279,11 @@ void CrossPointWebServerActivity::startWebServer() {
   }
 
   // Create the web server instance
-  webServer.reset(new CrossPointWebServer());
+  webServer = makeUniqueNoThrow<CrossPointWebServer>();
+  if (!webServer) {
+    onGoHome();
+    return;
+  }
   webServer->begin();
 
   if (webServer->isRunning()) {
@@ -298,6 +305,7 @@ void CrossPointWebServerActivity::startWebServer() {
 void CrossPointWebServerActivity::loop() {
   // Handle different states
   if (state == WebServerActivityState::SERVER_RUNNING) {
+    if (handleServerInput()) return;
     // Handle DNS requests for captive portal (AP mode only)
     if (isApMode && dnsServer) {
       dnsServer->processNextRequest();
@@ -365,6 +373,10 @@ void CrossPointWebServerActivity::loop() {
       constexpr int MAX_ITERATIONS = 500;
       for (int i = 0; i < MAX_ITERATIONS && webServer->isRunning(); i++) {
         webServer->handleClient();
+        if (exitAfterAo3) {
+          onGoHome();
+          return;
+        }
         // Reset watchdog every 32 iterations
         if ((i & 0x1F) == 0x1F) {
           resetTaskWatchdogIfSubscribed();
@@ -376,20 +388,14 @@ void CrossPointWebServerActivity::loop() {
           mappedInput.update(true);
           // Home remains available now; other configured actions are deferred
           // to the next main-loop pass.
-          if (mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasHomeGesture()) {
-            onGoHome();
-            return;
-          }
+          if (handleServerInput()) return;
         }
       }
       lastHandleClientTime = millis();
     }
 
     // Also check outside the request-processing loop.
-    if (mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasHomeGesture()) {
-      onGoHome();
-      return;
-    }
+    if (handleServerInput()) return;
   }
 }
 
@@ -419,6 +425,10 @@ void CrossPointWebServerActivity::render(RenderLock&&) {
 }
 
 void CrossPointWebServerActivity::renderServerRunning() const {
+  if (showAo3) {
+    renderAo3Pairing();
+    return;
+  }
   const auto& metrics = UITheme::getInstance().getMetrics();
   const auto pageWidth = renderer.getScreenWidth();
 
@@ -493,7 +503,7 @@ void CrossPointWebServerActivity::renderServerRunning() const {
     renderer.drawCenteredText(SMALL_FONT_ID, startY, hostnameUrl.c_str(), true);
   }
 
-  const auto labels = mappedInput.mapLabels(tr(STR_EXIT), "", "", "");
+  const auto labels = mappedInput.mapLabels(tr(STR_EXIT), isApMode ? "" : tr(STR_AO3_TITLE), "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -527,4 +537,66 @@ void CrossPointWebServerActivity::renderWifiIndicator(int subHeaderTop) const {
     renderer.drawLine(x0, y0, x0 + xSize, y0 + xSize, 2, true);
     renderer.drawLine(x0, y0 + xSize, x0 + xSize, y0, 2, true);
   }
+}
+
+bool CrossPointWebServerActivity::handleServerInput() {
+  if (mappedInput.wasReleased(MappedInputManager::Button::Back) || mappedInput.wasHomeGesture()) {
+    if (webServer && webServer->ao3()) webServer->ao3()->cancel();
+    onGoHome();
+    return true;
+  }
+  if (!isApMode && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    {
+      RenderLock lock;
+      if (showAo3)
+        showAo3 = false;
+      else {
+        if (auto* cache = renderer.getFontCacheManager()) cache->releaseSdFontCaches();
+        ao3Unavailable = !webServer->enableAo3();
+        if (!ao3Unavailable) webServer->ao3()->setObserver(ao3Progress, this);
+        showAo3 = true;
+      }
+    }
+    requestUpdate();
+    return true;
+  }
+  return false;
+}
+
+void CrossPointWebServerActivity::ao3Progress(void* context) {
+  auto* self = static_cast<CrossPointWebServerActivity*>(context);
+  self->mappedInput.update(true);
+  if (self->mappedInput.wasReleased(MappedInputManager::Button::Back) || self->mappedInput.wasHomeGesture()) {
+    self->exitAfterAo3 = true;
+    self->webServer->ao3()->cancel();
+  }
+}
+
+void CrossPointWebServerActivity::renderAo3Pairing() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const int width = renderer.getScreenWidth();
+  int y = metrics.topPadding + metrics.headerHeight + metrics.tabBarHeight + metrics.verticalSpacing * 2;
+  const int line = renderer.getLineHeight(UI_10_FONT_ID) + 4;
+  GUI.drawHeader(renderer, Rect{0, metrics.topPadding, width, metrics.headerHeight}, tr(STR_AO3_WEB_TITLE), nullptr);
+  if (ao3Unavailable || !webServer->ao3()) {
+    renderer.drawCenteredText(SMALL_FONT_ID, y, tr(STR_AO3_WEB_UNAVAILABLE));
+  } else {
+    const auto* ao3 = webServer->ao3();
+    const std::string url = "https://" + connectedIP + ":8443/";
+    renderer.drawCenteredText(UI_10_FONT_ID, y, url.c_str());
+    y += line * 2;
+    renderer.drawCenteredText(SMALL_FONT_ID, y, tr(STR_AO3_WEB_CODE));
+    y += line;
+    renderer.drawCenteredText(UI_10_FONT_ID, y, ao3->code().c_str(), true, EpdFontFamily::BOLD);
+    y += line * 2;
+    renderer.drawCenteredText(SMALL_FONT_ID, y, tr(STR_AO3_WEB_FINGERPRINT));
+    y += line;
+    for (size_t i = 0; i < 4; ++i) {
+      const auto part = ao3->fingerprint().substr(i * 16, 16);
+      renderer.drawCenteredText(SMALL_FONT_ID, y, part.c_str());
+      y += line;
+    }
+  }
+  const auto labels = mappedInput.mapLabels(tr(STR_EXIT), tr(STR_FILE_TRANSFER), "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }

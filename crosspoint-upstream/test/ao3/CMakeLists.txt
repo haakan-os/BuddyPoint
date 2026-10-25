@@ -13,6 +13,8 @@ FetchContent_MakeAvailable(ao3_arduinojson)
 find_package(ZLIB REQUIRED)
 add_executable(Ao3ClientTest
   Ao3ClientTest.cpp
+  Ao3WebTest.cpp
+  ../../src/network/Ao3WebJobs.cpp
   ../../src/network/Ao3Client.cpp
   ../../lib/Ao3/Ao3.cpp
   ../../lib/ZipFile/ZipFile.cpp

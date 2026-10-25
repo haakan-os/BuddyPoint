@@ -609,3 +609,8 @@ STR_NOTE_QUESTION: "Question"
 
 STR_BUDDY_POINT: "Buddy Point"
 STR_BUDDY_POINT_SLEEPING: "Sleeping"
+
+STR_AO3_WEB_TITLE: "AO3 Account"
+STR_AO3_WEB_CODE: "Browser pairing code"
+STR_AO3_WEB_FINGERPRINT: "Verify certificate SHA-256"
+STR_AO3_WEB_UNAVAILABLE: "Close transfers, check Wi-Fi and retry."

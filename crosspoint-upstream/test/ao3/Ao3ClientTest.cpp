@@ -1,4 +1,5 @@
 #include <Ao3Client.h>
+#include <Ao3WebJobs.h>
 #include <Epub.h>
 #include <esp_http_client.h>
 #include <gtest/gtest.h>
@@ -320,5 +321,104 @@ TEST_F(Ao3ClientTest, WarningsAndTagsSurviveAnOfflineReload) {
   ASSERT_TRUE(client.readDownloaded(work.id, saved));
   EXPECT_EQ(saved.warnings, work.warnings);
   EXPECT_EQ(saved.tags, work.tags);
+}
+
+TEST_F(Ao3ClientTest, WebJobsQueueLoginWithoutSavingPasswordAndRejectOverlap) {
+  Ao3WebJobs jobs;
+  EXPECT_FALSE(jobs.enqueue(Ao3WebJobs::Job::Login, "", "password"));
+  EXPECT_FALSE(jobs.enqueue(Ao3WebJobs::Job::Login, "Reader", std::string(257, 'x')));
+  ao3test::responses.push_back({200, "<input name='authenticity_token' value='csrf'><input name='user[password]'>"});
+  ao3test::responses.push_back(
+      {302, "", {{"Location", "/users/Reader"}, {"Set-Cookie", "_session=web; Path=/; Secure"}}});
+  ao3test::responses.push_back({200, "<a href='/users/logout'>Log Out</a>"});
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Login, "Reader", "secret-password"));
+  EXPECT_TRUE(ao3test::requests.empty());
+  EXPECT_FALSE(jobs.enqueue(Ao3WebJobs::Job::Updates));
+  jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_TRUE(jobs.status().signedIn);
+  EXPECT_EQ(jobs.status().account, "Reader");
+  EXPECT_EQ(jobs.status().error, Ao3Client::Error::None);
+  for (const auto& [path, data] : ao3test::files) EXPECT_EQ(contents(path).find("secret-password"), std::string::npos);
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Forget));
+  jobs.tick();
+  EXPECT_FALSE(jobs.status().signedIn);
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, WebJobsCancellationBeforeLoginMakesNoNetworkRequest) {
+  Ao3WebJobs jobs;
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Login, "Reader", "password"));
+  jobs.cancel();
+  jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_EQ(jobs.status().error, Ao3Client::Error::Cancelled);
+  EXPECT_TRUE(ao3test::requests.empty());
+  EXPECT_FALSE(Storage.exists(SESSION));
+}
+TEST_F(Ao3ClientTest, WebJobsPrivateBookmarksDownloadAndThenSkipUnchangedFics) {
+  login();
+  Ao3WebJobs jobs;
+  const std::string listing =
+      "<a href='/users/logout'>Log Out</a><ol class='bookmark index'><li class='bookmark blurb'>"
+      "<h4 class='heading'><a href='/works/123'>Private fic</a></h4></li></ol>";
+  const std::string detail =
+      "<h2 class='title'>Private fic</h2><dd class='chapters'>2/3</dd>"
+      "<a href='/downloads/123/private.epub'>EPUB</a>";
+  for (int pass = 0; pass < 2; ++pass) {
+    ao3test::responses.push_back({200, listing});
+    ao3test::responses.push_back({200, detail});
+    if (!pass) ao3test::responses.push_back({200, epub()});
+    ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Bookmarks));
+    for (int i = 0; i < 5 && jobs.busy(); ++i) jobs.tick();
+    EXPECT_FALSE(jobs.busy());
+    EXPECT_EQ(jobs.status().checked, 1U);
+    EXPECT_EQ(jobs.status().saved, pass ? 0U : 1U);
+    EXPECT_EQ(jobs.status().unchanged, pass ? 1U : 0U);
+    EXPECT_EQ(jobs.status().error, Ao3Client::Error::None);
+    EXPECT_EQ(ao3test::requests.back().headers.at("Cookie"), "_session=authenticated");
+  }
+  EXPECT_TRUE(Storage.exists("/AO3/123.epub"));
+}
+TEST_F(Ao3ClientTest, WebJobsStopOnExpiredSessionAndRateLimit) {
+  login();
+  Ao3WebJobs jobs;
+  ao3test::responses.push_back({200, "<ol class='bookmark index'></ol>"});
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Bookmarks));
+  jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_EQ(jobs.status().error, Ao3Client::Error::SignIn);
+  ao3test::responses.push_back({429, "Slow down"});
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Bookmarks));
+  jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_EQ(jobs.status().error, Ao3Client::Error::RateLimit);
+}
+TEST_F(Ao3ClientTest, WebJobsUpdateSnapshotCancellationKeepsExistingBooks) {
+  ao3test::responses.push_back({200, epub()});
+  ASSERT_TRUE(client.download(work));
+  Ao3WebJobs jobs;
+  jobs.setObserver([](void* ptr) { static_cast<Ao3WebJobs*>(ptr)->cancel(); }, &jobs);
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Updates));
+  jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_EQ(jobs.status().error, Ao3Client::Error::Cancelled);
+  EXPECT_FALSE(Storage.exists(Ao3Client::UPDATE_QUEUE));
+  EXPECT_EQ(contents("/AO3/123.epub"), epub());
+}
+TEST_F(Ao3ClientTest, WebJobsPublicUpdatesDownloadNewChapters) {
+  ao3test::responses.push_back({200, epub()});
+  ASSERT_TRUE(client.download(work));
+  Ao3WebJobs jobs;
+  ao3test::responses.push_back({200,
+                                "<h2 class='title'>Updated fic</h2><dd class='chapters'>3/3</dd>"
+                                "<a href='/downloads/123/updated.epub'>EPUB</a>"});
+  ao3test::responses.push_back({200, epub()});
+  ASSERT_TRUE(jobs.enqueue(Ao3WebJobs::Job::Updates));
+  for (int i = 0; i < 4 && jobs.busy(); ++i) jobs.tick();
+  EXPECT_FALSE(jobs.busy());
+  EXPECT_EQ(jobs.status().saved, 1U);
+  EXPECT_FALSE(Storage.exists(Ao3Client::UPDATE_QUEUE));
+  ASSERT_TRUE(client.readDownloaded("123", work));
+  EXPECT_EQ(work.chapters, 3U);
 }
 }  // namespace

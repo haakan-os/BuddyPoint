@@ -34,6 +34,20 @@ If the session expires, bookmark sync stops and asks you to sign in again. It do
 
 The password is used for sign-in and is not written to the SD card. The remembered session is stored in `/.crosspoint/ao3-session.json`, using BuddyPoint's existing device-derived obfuscation. **Obfuscation is not encryption**: treat the SD card and backups as containing account access. **Forget AO3 sign-in** removes the local session, including pending and backup copies; it does not revoke sessions on AO3 or erase downloaded books.
 
+## Sign in from your browser
+
+1. On the reader, open **File Transfer → Join a Network** and connect to Wi-Fi with internet access. Connect your computer or phone to the same network.
+2. Press **Confirm / AO3** on the reader's File Transfer screen. This enables the account panel and displays its HTTPS address, pairing code and certificate fingerprint. The normal web interface also has an **AO3 Account** link with these instructions.
+3. Open the displayed `https://<reader-ip>:8443/` address. The reader creates a local, self-signed certificate, so the browser will show a certificate warning. Inspect the certificate's **SHA-256 fingerprint** and compare all four lines with the reader before accepting it. Ignore separators and letter case when comparing. Use a desktop browser with certificate details if your phone cannot show them.
+4. Enter the eight-digit code shown on the reader, then enter your AO3 username and password. The page reports the saved account and any sign-in error.
+5. Use **Download bookmarked fics**, **Update downloaded fics**, **Cancel job** or **Forget AO3 sign-in**. The page shows checked, saved, unchanged and failed counts. Downloads use the same `/AO3` folder and saved account as the device app.
+
+Keep File Transfer open until the job finishes. Pressing Back/Home on the reader cancels the job and exits; completed downloads remain. Existing uploads finish before queued AO3 jobs start, and new file requests wait while an AO3 job runs. Returning to the File Transfer screen with Confirm leaves the secure panel enabled. Exiting File Transfer closes it.
+
+The pairing code, browser token and TLS private key exist only for that File Transfer session; reopening it creates new ones. Refreshing the browser requires pairing again. Five incorrect codes lock pairing until File Transfer is reopened. The password is sent over HTTPS to the reader, then over verified HTTPS to AO3, and is not saved on SD. The browser token stays in page memory rather than cookies or local storage. The ordinary HTTP interface never accepts AO3 credentials, and its file endpoints, WebDAV and WebSocket uploads block hidden system paths and their FAT short-name aliases. Downloaded EPUBs remain ordinary files available through File Transfer.
+
+Hotspot mode cannot reach AO3. If the panel cannot start, finish any uploads, check Wi-Fi, and retry; TLS also needs sufficient free memory. AO3 browser challenges still require attention on AO3 itself—this panel does not bypass them.
+
 ## Download updates
 
 Use **Update downloaded fics** to check every fic downloaded through this app, or **Check and download updates** on a saved fic. Checks compare chapter count, completion, word count, update date and the EPUB download URL. Same-day edits are detected when these values change. Edits that change none of this metadata cannot be detected.
@@ -56,16 +70,17 @@ Keep tracked fics at `/AO3/<work-id>.epub`. Moving them elsewhere, including wit
 
 ## Validation
 
-Host tests cover streamed AO3 HTML, warnings/tags, distinct badge states, reading-status transitions, CSRF and cookie rotation, private-bookmark session expiry, authenticated work and EPUB requests, trusted redirects, rate limits, cancellation, incomplete downloads, real ZIP validation, atomic replacement, cache preservation, SD failures and library pagination. HTTP, hardware credentials and SD storage are simulated in the client tests.
+Host tests cover streamed AO3 HTML, warnings/tags, distinct badge states, reading-status transitions, CSRF and cookie rotation, private-bookmark session expiry, authenticated work and EPUB requests, trusted redirects, rate limits, cancellation, incomplete downloads, real ZIP validation, atomic replacement, cache preservation, SD failures and library pagination. HTTP, hardware credentials and SD storage are simulated in the client tests. Web tests also cover pairing lockout and reset, origin checks, protected paths including FAT aliases, queued login, bookmark/update jobs, cancellation, browser actions and password-field clearing.
 
 ```sh
 cmake -S crosspoint-upstream/test -B build/host-tests
 cmake --build build/host-tests --target Ao3Test Ao3ClientTest -j4
 ctest --test-dir build/host-tests -R '^Ao3' --output-on-failure
+node scripts/test_ao3_web.mjs
 pio run -d crosspoint-upstream -e default
 ```
 
-Before publishing firmware, test a real AO3 account and physical reader: sign in, retrieve a private bookmark and account-only fic, download across multiple bookmark pages, interrupt a download, update a partially read fic, reopen it, and check the selected theme in all four orientations. Observe free heap during TLS and repeated syncs. Cloud compilation and mocked tests do not verify AO3's current production HTML, anti-bot behavior, physical flashing or on-device TLS memory usage.
+Before publishing firmware, test a real AO3 account and physical reader: sign in, retrieve a private bookmark and account-only fic, download across multiple bookmark pages, interrupt a download, update a partially read fic, reopen it, and check the selected theme in all four orientations. For the web panel, verify the certificate fingerprint, pair, sign in, download a private bookmark, cancel a running job, forget the account, and confirm that closing File Transfer invalidates the browser token. Check wrong-code lockout and that direct HTTP/WebDAV access to `/.crosspoint/ao3-session.json` returns 403. Observe free heap during concurrent browser polling and AO3 TLS, and across repeated syncs. Cloud compilation and mocked tests do not verify AO3's current production HTML, anti-bot behavior, physical flashing or on-device TLS memory usage.
 
 ## Development and attribution
 

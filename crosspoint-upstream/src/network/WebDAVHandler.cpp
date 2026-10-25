@@ -4,6 +4,7 @@
 #include <HalStorage.h>
 #include <Logging.h>
 
+#include "WebPathPolicy.h"
 #include "util/BookCacheUtils.h"
 #include "util/TaskWatchdog.h"
 
@@ -172,6 +173,10 @@ void WebDAVHandler::handleOptions(WebServer& s) {
 
 void WebDAVHandler::handlePropfind(WebServer& s) {
   String path = getRequestPath(s);
+  if (isProtectedPath(path)) {
+    s.send(403, "text/plain", "Forbidden");
+    return;
+  }
   int depth = getDepth(s);
 
   LOG_DBG("DAV", "PROPFIND %s depth=%d", path.c_str(), depth);
@@ -759,29 +764,7 @@ void WebDAVHandler::urlEncodePath(const String& path, String& out) const {
 }
 
 bool WebDAVHandler::isProtectedPath(const String& path) const {
-  // Check every segment of the path, not just the last one.
-  // This prevents access to e.g. /.hidden/somefile or /System Volume Information/foo
-  int start = 0;
-  while (start < (int)path.length()) {
-    if (path.charAt(start) == '/') {
-      start++;
-      continue;
-    }
-    int end = path.indexOf('/', start);
-    if (end == -1) end = path.length();
-
-    String segment = path.substring(start, end);
-
-    if (segment.startsWith(".")) return true;
-
-    for (const auto* item : HIDDEN_ITEMS) {
-      if (segment.equals(item)) return true;
-    }
-
-    start = end + 1;
-  }
-
-  return false;
+  return web_path::protectedPath(std::string_view(path.c_str(), path.length()));
 }
 
 int WebDAVHandler::getDepth(WebServer& s) const {

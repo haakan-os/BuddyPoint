@@ -33,6 +33,7 @@ class CrossPointWebServerActivity final : public Activity {
   // Network mode
   NetworkMode networkMode = NetworkMode::JOIN_NETWORK;
   bool isApMode = false;
+  bool showAo3 = false, ao3Unavailable = false, exitAfterAo3 = false;
 
   // Web server - owned by this activity
   std::unique_ptr<CrossPointWebServer> webServer;
@@ -53,6 +54,9 @@ class CrossPointWebServerActivity final : public Activity {
   int lastWifiBars = 0;
 
   void renderServerRunning() const;
+  void renderAo3Pairing() const;
+  bool handleServerInput();
+  static void ao3Progress(void* context);
   void renderWifiIndicator(int subHeaderTop) const;
 
   void onNetworkModeSelected(NetworkMode mode);

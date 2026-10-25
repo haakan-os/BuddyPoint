@@ -12,6 +12,7 @@
 namespace ao3test {
 inline std::map<std::string, std::vector<uint8_t>> files;
 inline std::set<std::string> directories;
+inline std::map<std::string, std::string> aliases;
 inline std::string failWriteSuffix;
 inline std::string failRenameTo;
 inline bool failRead = false;
@@ -19,6 +20,7 @@ inline bool failClose = false;
 inline size_t writes = 0;
 inline void reset() {
   files.clear();
+  aliases.clear();
   directories.clear();
   failWriteSuffix.clear();
   failRenameTo.clear();
@@ -111,7 +113,10 @@ class HalStorage {
  public:
   HalFile open(const char* path) {
     HalFile file;
-    if (exists(path)) file.open(path);
+    if (ao3test::aliases.contains(path))
+      file.open(ao3test::aliases.at(path));
+    else if (exists(path))
+      file.open(path);
     return file;
   }
   bool openFileForRead(const char*, const std::string& path, HalFile& file) {

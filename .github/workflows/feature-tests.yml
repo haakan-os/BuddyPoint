@@ -2,9 +2,9 @@ name: Firmware feature tests
 on:
   push:
     branches: [main]
-    paths: ['crosspoint-upstream/**', 'koreader-plugin/**', 'scripts/test*.lua', '.github/workflows/feature-tests.yml']
+    paths: ['crosspoint-upstream/**', 'koreader-plugin/**', 'scripts/test*.lua', 'scripts/test*.mjs', '.github/workflows/feature-tests.yml']
   pull_request:
-    paths: ['crosspoint-upstream/**', 'koreader-plugin/**', 'scripts/test*.lua', '.github/workflows/feature-tests.yml']
+    paths: ['crosspoint-upstream/**', 'koreader-plugin/**', 'scripts/test*.lua', 'scripts/test*.mjs', '.github/workflows/feature-tests.yml']
 permissions:
   contents: read
 jobs:
@@ -18,6 +18,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lua5.4 libexpat1-dev zlib1g-dev
       - name: Test KOReader notes and transfers
         run: lua scripts/test_notes.lua
+      - name: Test AO3 web panel
+        run: node scripts/test_ao3_web.mjs
       - name: Test library, Markdown, AO3 and OTA
         run: |
           cmake -S crosspoint-upstream/test -B /tmp/tests
