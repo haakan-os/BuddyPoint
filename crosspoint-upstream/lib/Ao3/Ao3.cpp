@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <limits>
+#include <new>
 
 namespace ao3 {
 namespace {
@@ -231,49 +233,127 @@ bool changed(const Work& downloaded, const Work& remote) {
           downloaded.words != remote.words || downloaded.totalChapters != remote.totalChapters ||
           (!downloaded.download.empty() && !remote.download.empty() && downloaded.download != remote.download));
 }
-bool Cookies::restore(std::string_view header) {
-  if (header.size() > MAX_COOKIE_BYTES) return false;
-  auto remaining = header;
+bool Cookies::prepare() {
+  if (value) return true;
+  value.reset(new (std::nothrow) char[MAX_COOKIE_BYTES + 1]{});
+  return value != nullptr;
+}
+void Cookies::clear() {
+  if (value) std::memset(value.get(), 0, length + 1);
+  length = 0;
+}
+bool Cookies::aliases(std::string_view input) const {
+  if (!value || input.empty()) return false;
+  const auto begin = reinterpret_cast<uintptr_t>(value.get());
+  const auto address = reinterpret_cast<uintptr_t>(input.data());
+  return address >= begin && address < begin + MAX_COOKIE_BYTES + 1;
+}
+bool Cookies::restore(std::string_view serialized) {
+  if (serialized.size() > MAX_COOKIE_BYTES) return false;
+  if (aliases(serialized)) return serialized == header();
+  size_t required = 0;
+  auto remaining = serialized;
   while (!remaining.empty()) {
-    auto end = remaining.find(';');
-    if (!cookiePart(trim(remaining.substr(0, end)))) return false;
+    const auto end = remaining.find(';');
+    const auto part = trim(remaining.substr(0, end));
+    if (!cookiePart(part)) return false;
+    required += (required ? 2 : 0) + part.size();
+    if (required > MAX_COOKIE_BYTES) return false;
     if (end == std::string_view::npos) break;
     remaining.remove_prefix(end + 1);
   }
-  value = header;
+  if (!prepare()) return false;
+  clear();
+  remaining = serialized;
+  while (!remaining.empty()) {
+    const auto end = remaining.find(';');
+    const auto part = trim(remaining.substr(0, end));
+    if (length) {
+      value[length++] = ';';
+      value[length++] = ' ';
+    }
+    std::memcpy(value.get() + length, part.data(), part.size());
+    length += part.size();
+    if (end == std::string_view::npos) break;
+    remaining.remove_prefix(end + 1);
+  }
+  value[length] = 0;
   return true;
 }
 bool Cookies::update(std::string_view cookie) {
-  auto first = trim(cookie.substr(0, cookie.find(';')));
-  if (!cookiePart(first)) return false;
+  // Input comes from the HTTP parser, independently of the jar being edited.
+  if (aliases(cookie)) return false;
+  const auto separator = cookie.find(';');
+  const auto first = trim(cookie.substr(0, separator));
+  if (first.size() > MAX_COOKIE_BYTES || !cookiePart(first)) return false;
   const auto key = first.substr(0, first.find('='));
-  const auto attributes = lower(cookie.substr(first.size()));
-  const auto domain = attributes.find("domain=");
-  if (domain != std::string::npos) {
-    auto host = trim(std::string_view(attributes).substr(domain + 7));
-    host = trim(host.substr(0, host.find(';')));
-    if (host != "archiveofourown.org" && host != ".archiveofourown.org") return false;
+  const auto equalIgnoringCase = [](std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+      if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i])))
+        return false;
+    return true;
+  };
+  bool expired = first.size() == key.size() + 1;
+  auto attributes = separator == std::string_view::npos ? std::string_view{} : cookie.substr(separator + 1);
+  while (!attributes.empty()) {
+    const auto end = attributes.find(';');
+    const auto attribute = trim(attributes.substr(0, end));
+    const auto equals = attribute.find('=');
+    if (equals != std::string_view::npos) {
+      const auto name = trim(attribute.substr(0, equals));
+      const auto content = trim(attribute.substr(equals + 1));
+      if (equalIgnoringCase(name, "domain") && !equalIgnoringCase(content, "archiveofourown.org") &&
+          !equalIgnoringCase(content, ".archiveofourown.org"))
+        return false;
+      if (equalIgnoringCase(name, "max-age") && content == "0") expired = true;
+      if (equalIgnoringCase(name, "expires") && equalIgnoringCase(content.substr(0, 16), "thu, 01 jan 1970"))
+        expired = true;
+    }
+    if (end == std::string_view::npos) break;
+    attributes.remove_prefix(end + 1);
   }
-  std::string out;
-  out.reserve(MAX_COOKIE_BYTES);
-  auto remaining = std::string_view(value);
+  // Validate the complete replacement before mutating the current session.
+  size_t required = 0;
+  auto remaining = header();
+  while (!remaining.empty()) {
+    const auto end = remaining.find(';');
+    const auto part = trim(remaining.substr(0, end));
+    if (part.substr(0, part.find('=')) != key) required += (required ? 2 : 0) + part.size();
+    if (end == std::string_view::npos) break;
+    remaining.remove_prefix(end + 1);
+  }
+  if (!expired) required += (required ? 2 : 0) + first.size();
+  if (required > MAX_COOKIE_BYTES || !prepare()) return false;
+  remaining = header();
+  size_t written = 0;
   while (!remaining.empty()) {
     const auto end = remaining.find(';');
     const auto part = trim(remaining.substr(0, end));
     if (part.substr(0, part.find('=')) != key) {
-      if (!out.empty()) out += "; ";
-      out += part;
+      if (written) {
+        value[written++] = ';';
+        value[written++] = ' ';
+      }
+      // restore/update keep canonical separators, so compaction only moves left.
+      std::memmove(value.get() + written, part.data(), part.size());
+      written += part.size();
     }
     if (end == std::string_view::npos) break;
     remaining.remove_prefix(end + 1);
   }
-  if (first.size() > key.size() + 1 && attributes.find("max-age=0") == std::string::npos &&
-      attributes.find("expires=thu, 01 jan 1970") == std::string::npos) {
-    if (!out.empty()) out += "; ";
-    out += first;
+  if (!expired) {
+    if (written) {
+      value[written++] = ';';
+      value[written++] = ' ';
+    }
+    std::memcpy(value.get() + written, first.data(), first.size());
+    written += first.size();
   }
-  if (out.size() > MAX_COOKIE_BYTES) return false;
-  value = std::move(out);
+  // Erase stale tail bytes when a rotated/expired cookie shortens the jar.
+  if (written < length) std::memset(value.get() + written, 0, length - written);
+  length = written;
+  value[length] = 0;
   return true;
 }
 

@@ -1,4 +1,4 @@
-add_executable(Ao3Test Ao3Test.cpp ../../lib/Ao3/Ao3.cpp ../../lib/Ao3/Ao3Badge.cpp)
+add_executable(Ao3Test Ao3Test.cpp Ao3CookieAllocationTest.cpp ../../lib/Ao3/Ao3.cpp ../../lib/Ao3/Ao3Badge.cpp)
 target_include_directories(Ao3Test PRIVATE ../../lib/Ao3)
 target_link_libraries(Ao3Test PRIVATE crosspoint_test_common GTest::gtest_main)
 gtest_discover_tests(Ao3Test)

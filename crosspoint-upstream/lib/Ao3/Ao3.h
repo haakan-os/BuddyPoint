@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -45,13 +46,18 @@ bool changed(const Work& downloaded, const Work& remote);
 // forwarded as cookies, and expired cookies replace/remove their older values.
 class Cookies {
  public:
+  // Reserve bounded storage before TLS; subsequent updates do not allocate.
+  bool prepare();
   bool update(std::string_view setCookie);
   bool restore(std::string_view header);
-  const std::string& header() const { return value; }
-  void clear() { value.clear(); }
+  std::string_view header() const { return {value ? value.get() : "", length}; }
+  void clear();
 
  private:
-  std::string value;
+  // Lazy allocation keeps offline library clients small and stays off the task stack.
+  std::unique_ptr<char[]> value;
+  size_t length = 0;
+  bool aliases(std::string_view input) const;
 };
 
 // Streaming, bounded HTML extraction; no page-sized DOM or response string.

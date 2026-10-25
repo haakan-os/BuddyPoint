@@ -103,6 +103,10 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
     lastError = Error::Parse;
     return false;
   }
+  if (!cookies.prepare()) {
+    lastError = Error::Memory;
+    return false;
+  }
   if (time(nullptr) < 1704067200) {
     halClock.syncFromNTP();
     // X3/X4 may have no hardware RTC; TLS still needs a valid system clock.
@@ -146,7 +150,9 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
     Headers headers{&cookies, {}, false};
     config->url = url.c_str();
     config->timeout_ms = 20000;
-    config->buffer_size = 8192;  // Rails session Set-Cookie headers can exceed 2 KB.
+    // esp_http_client reassembles fragmented headers before dispatching them.
+    // A long Set-Cookie does not require an equally large receive buffer.
+    config->buffer_size = 2048;
     config->buffer_size_tx = 6144;
     config->disable_auto_redirect = true;
     config->crt_bundle_attach = esp_crt_bundle_attach;
@@ -161,7 +167,7 @@ bool Ao3Client::request(std::string url, ao3::Parser* parser, HalFile* file, con
     esp_http_client_set_header(http, "User-Agent", "BuddyPoint/" CROSSPOINT_VERSION " (AO3 reader)");
     esp_http_client_set_header(http, "Accept-Encoding", "identity");
     esp_http_client_set_header(http, "Accept", file ? "application/epub+zip" : "text/html");
-    if (!cookies.header().empty()) esp_http_client_set_header(http, "Cookie", cookies.header().c_str());
+    if (!cookies.header().empty()) esp_http_client_set_header(http, "Cookie", cookies.header().data());
     if (post) {
       esp_http_client_set_method(http, HTTP_METHOD_POST);
       esp_http_client_set_header(http, "Content-Type", "application/x-www-form-urlencoded");
@@ -261,7 +267,7 @@ bool Ao3Client::saveSession() {
   if (!signedIn() || savedCookies == cookies.header()) return true;
   JsonDocument doc;
   doc["username"] = username;
-  doc["session_obf"] = obfuscation::obfuscateToBase64(cookies.header());
+  doc["session_obf"] = obfuscation::obfuscateToBase64(std::string(cookies.header()));
   if (!writeDocument(SESSION_PATH, doc)) {
     lastError = Error::StorageError;
     return false;

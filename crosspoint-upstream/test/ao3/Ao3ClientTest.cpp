@@ -456,4 +456,23 @@ TEST_F(Ao3ClientTest, WebJobsSnapshotFailureFinishesBeforeQueueIsOpened) {
   EXPECT_FALSE(Storage.exists(Ao3Client::UPDATE_QUEUE));
   EXPECT_EQ(contents("/AO3/123.epub"), epub());
 }
+TEST_F(Ao3ClientTest, LoginRetainsLongSessionCookiesThroughRotation) {
+  const std::string before = "_session=" + std::string(3000, 'a');
+  const std::string after = "_session=" + std::string(3500, 'b');
+  ao3test::responses.push_back({200,
+                                "<input name='authenticity_token' value='csrf'><input name='user[password]'>",
+                                {{"Set-Cookie", before + "; Path=/; Secure; HttpOnly"}}});
+  ao3test::responses.push_back(
+      {302, "", {{"Location", "/users/Reader"}, {"Set-Cookie", after + "; Path=/; Secure; HttpOnly"}}});
+  ao3test::responses.push_back({200, "<a href='/users/logout'>Log Out</a>"});
+  ASSERT_TRUE(client.signIn("Reader", "password"));
+  ASSERT_EQ(ao3test::requests.size(), 3U);
+  EXPECT_EQ(ao3test::requests[1].headers.at("Cookie"), before);
+  EXPECT_EQ(ao3test::requests[2].headers.at("Cookie"), after);
+  EXPECT_TRUE(client.signedIn());
+  for (const auto& request : ao3test::requests) EXPECT_TRUE(request.tlsVerified);
+  Ao3Client restored;
+  ASSERT_TRUE(restored.loadSession());
+  EXPECT_EQ(restored.account(), "Reader");
+}
 }  // namespace
