@@ -21,6 +21,7 @@
 #include "RecentBooksStore.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "components/Ao3Presentation.h"
 #include "components/UIScale.h"
 #include "components/UITheme.h"
 #include "components/icons/search32.h"
@@ -38,7 +39,8 @@ constexpr int TITLE_TAB = 1;
 constexpr int AUTHOR_TAB = 2;
 constexpr int MARKDOWN_TAB = 3;
 constexpr int FAVOURITES_TAB = 4;
-constexpr int TAB_SLOTS = FAVOURITES_TAB + 1;
+constexpr int AO3_TAB = 5;
+constexpr int TAB_SLOTS = AO3_TAB + 1;
 
 constexpr bool isDescending(const library::SortOrder order) {
   return order == library::SortOrder::RecentDesc || order == library::SortOrder::TitleDesc ||
@@ -55,13 +57,14 @@ constexpr bool isAuthorSort(const library::SortOrder order) {
 
 constexpr library::SortOrder orderForTab(const int tab, const uint8_t descendingTabs) {
   const bool descending = (descendingTabs & (1u << tab)) != 0;
-  if (tab == TITLE_TAB || tab == MARKDOWN_TAB || tab == FAVOURITES_TAB)
+  if (tab == TITLE_TAB || tab == MARKDOWN_TAB || tab == FAVOURITES_TAB || tab == AO3_TAB)
     return descending ? library::SortOrder::TitleDesc : library::SortOrder::TitleAsc;
   if (tab == AUTHOR_TAB) return descending ? library::SortOrder::AuthorDesc : library::SortOrder::AuthorAsc;
   return descending ? library::SortOrder::RecentDesc : library::SortOrder::RecentAsc;
 }
 
 const char* tabLabelFor(const int tab) {
+  if (tab == AO3_TAB) return tr(STR_AO3_TITLE);
   if (tab == FAVOURITES_TAB) return tr(STR_FAVOURITES);
   if (tab == MARKDOWN_TAB) return tr(STR_LIBRARY_TAB_MARKDOWN);
   if (tab == TITLE_TAB) return tr(STR_LIBRARY_TAB_TITLE);
@@ -393,6 +396,16 @@ void LibraryListActivity::selectTab(const int index, const bool toggleIfActive) 
   if (toggleIfActive && index == activeTab()) descendingTabs ^= static_cast<uint8_t>(1u << index);
   activeTabIndex = index;
   sortOrder = orderForTab(index, descendingTabs);
+  if (index == AO3_TAB && !ao3Refreshed) {
+    filtered.reset();
+    filteredCount = 0;
+    this->index.close();
+    GUI.drawPopup(renderer, tr(STR_LIBRARY_REBUILDING));
+    ao3Refreshed = rebuildIndex();
+    if (!this->index.open(library::libraryIndexPath())) LOG_ERR("LIB", "cannot reopen library index");
+    degraded = this->index.isOpen() && this->index.ranksDegraded();
+    resolvePinned();
+  }
   if ((index == MARKDOWN_TAB || index == FAVOURITES_TAB) && !markdownRefreshed) {
     // Release the row map before the builder allocates its bounded work buffers.
     filtered.reset();
@@ -445,8 +458,8 @@ int LibraryListActivity::rowFor(const int entry) const {
 }
 
 bool LibraryListActivity::groupable() const {
-  return activeTabIndex != MARKDOWN_TAB && activeTabIndex != FAVOURITES_TAB && !degraded && !isRecentSort(sortOrder) &&
-         bookRowCount() > 0;
+  return activeTabIndex != AO3_TAB && activeTabIndex != MARKDOWN_TAB && activeTabIndex != FAVOURITES_TAB && !degraded &&
+         !isRecentSort(sortOrder) && bookRowCount() > 0;
 }
 
 uint32_t LibraryListActivity::titleInitialFor(const int entry) {
@@ -557,13 +570,13 @@ void LibraryListActivity::applyFilter() {
   }
 
   uint16_t matchCount = 0;
-  if (!library::filterShelf(index, sortOrder, activeTabIndex == MARKDOWN_TAB, needle, matches.get(), total, matchCount,
-                            activeTabIndex == FAVOURITES_TAB)) {
+  if (!library::filterShelf(index, sortOrder, activeTabIndex == MARKDOWN_TAB, activeTabIndex == AO3_TAB ? "" : needle,
+                            matches.get(), total, matchCount, activeTabIndex == FAVOURITES_TAB)) {
     LOG_ERR("LIB", "cannot filter library shelf");
     filterFailed = true;
     return;
   }
-  if (activeTabIndex == FAVOURITES_TAB) {
+  if (activeTabIndex == FAVOURITES_TAB || activeTabIndex == AO3_TAB) {
     uint16_t kept = 0;
     std::string path;
     for (uint16_t i = 0; i < matchCount; ++i) {
@@ -572,7 +585,17 @@ void LibraryListActivity::applyFilter() {
         filterFailed = true;
         return;
       }
-      if (notes::isFavourite(path)) matches[kept++] = matches[i];
+      if (activeTabIndex == FAVOURITES_TAB) {
+        if (notes::isFavourite(path)) matches[kept++] = matches[i];
+      } else {
+        std::string id;
+        ao3::Work work;
+        if (!ao3::downloadedId(path, id) || !ao3Client.readDownloaded(id, work)) continue;
+        if (needle.empty() ||
+            library::matchesQuery(
+                library::fold(work.title + " " + work.author + " " + work.fandom + " " + work.tags, true), needle))
+          matches[kept++] = matches[i];
+      }
     }
     matchCount = kept;
   }
@@ -611,7 +634,7 @@ bool LibraryListActivity::rowTextFor(const int entry, std::string& title, std::s
     if (!index.readAuthor(record, author)) author.clear();
     // The stored title when the book gave one, the filename otherwise.
     if (!index.readTitle(record, title) || title.empty()) index.readName(record, title);
-    if (fileName) index.readName(record, *fileName);
+    if (fileName) index.readPath(record, *fileName);
   }
   if (title.empty()) title = tr(STR_LIBRARY_UNKNOWN_TITLE);
   return true;
@@ -726,14 +749,21 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
   auto& nav = activeNav();
   const int count = listCount();
   const bool authorGrouped = isAuthorSort(sortOrder);
-  const bool grouped = !isRecentSort(sortOrder);
+  const bool grouped = activeTabIndex != AO3_TAB && !isRecentSort(sortOrder);
 
   fui::ListProps props;
   props.count = static_cast<uint16_t>(count);
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch | fui::InputLongPress;
   props.labelText = screen.theme().bodyText;
-  props.labelText.maxLines = 1;
+  props.labelText.maxLines = activeTabIndex == AO3_TAB ? 2 : 1;
+  props.subtitleText = screen.theme().smallText;
+  props.subtitleText.maxLines =
+      activeTabIndex == AO3_TAB
+          ? ao3ui::summaryLines(screen.contentRect().height, screen.target().lineHeight(props.labelText.font),
+                                screen.target().lineHeight(props.subtitleText.font),
+                                std::max(screen.theme().listRowPaddingY, screen.theme().listTouchRowPaddingY))
+          : 2;
   // Breathing room between rows; the dense theme default packs the two-line
   // rows edge-to-edge.
   props.rowGap = std::max<int16_t>(screen.theme().listRowGap, 6);
@@ -744,6 +774,8 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
   const size_t cap = static_cast<size_t>(nav.visibleRows > 0 ? nav.visibleRows : 1) + 1;
   if (winTitles.size() < cap) winTitles.resize(cap);
   if (winAuthors.size() < cap) winAuthors.resize(cap);
+  if (winDetails.size() < cap) winDetails.resize(cap);
+  if (winBadges.size() < cap) winBadges.resize(cap);
   if (!groupsCollapsed && winHeaders.size() < cap) winHeaders.resize(cap);
   winItems.clear();
   if (winItems.capacity() < cap) winItems.reserve(cap);
@@ -791,7 +823,25 @@ void LibraryListActivity::buildRows(UiScreen& screen) {
 
     item.label = title.c_str();
     // Group headings stay bare; every book row gets its file-type icon.
-    if (!groupsCollapsed && !rowFile.empty()) item.icon = listIconFor(UITheme::getFileIcon(rowFile), 32);
+    if (!groupsCollapsed && !rowFile.empty()) {
+      item.icon = listIconFor(UITheme::getFileIcon(rowFile), 32);
+      std::string id;
+      ao3::Work work;
+      if (ao3::downloadedId(rowFile, id) && ao3Client.readDownloaded(id, work)) {
+        auto& badge = winBadges[static_cast<size_t>(rows)];
+        badge.build(work);
+        item.icon = ao3ui::bitmap(badge);
+        // Keep index title/author values intact for grouping; the subtitle
+        // has its own window storage and is refreshed only for visible rows.
+        auto& detail = winDetails[static_cast<size_t>(rows)];
+        detail = ao3ui::subtitle(work, activeTabIndex == AO3_TAB);
+        item.subtitle = detail.c_str();
+        if (activeTabIndex == AO3_TAB) {
+          title = work.title;
+          item.label = title.c_str();
+        }
+      }
+    }
     item.actionValue = static_cast<int16_t>(entry);
     winItems.push_back(item);
     rows++;
@@ -878,6 +928,7 @@ void LibraryListActivity::buildScreen(UiScreen& screen) {
       message = activeTabIndex == MARKDOWN_TAB ? tr(STR_LIBRARY_NOTES_EMPTY) : tr(STR_LIBRARY_EMPTY);
     }
     if (activeTabIndex == FAVOURITES_TAB && !filterFailed) message = tr(STR_FAVOURITES_EMPTY);
+    if (activeTabIndex == AO3_TAB && !filterFailed && query.empty()) message = tr(STR_AO3_LIBRARY_EMPTY);
     screen.centeredText(message);
     return;
   }

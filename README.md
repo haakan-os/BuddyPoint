@@ -9,6 +9,7 @@ A CrossPoint-based firmware for the **Xteink X3**, with enhanced KOReader sync, 
 - **BuddySync:** pair with the included KOReader plugin to transfer books and keep reading progress in sync.
 - **Custom themes:** Retro Mac, NeXTSTEP, and Windows 95 styles alongside the CrossPoint themes.
 - **Apps:** Sudoku with saved games, a Markdown viewer, and synced KOReader reading notes.
+- **AO3:** search and download fics, sign in for private bookmarks and account-only works, and download chapter updates from **Apps → AO3**. The **Library → AO3** shelf includes four-part fic badges, reading status and metadata using the current theme. See the [AO3 guide](docs/AO3.md).
 - **Notes and checklists:** send highlights and notes with BuddySync, and toggle Markdown tasks with the reader buttons. See the [setup guide](docs/NOTES_AND_CHECKLISTS.md).
 - **OneDrive notes:** a Python companion syncs a computer's OneDrive Markdown folder and subfolders with the reader, including checklist edits and conflict copies. See the [desktop sync guide](docs/ONEDRIVE_NOTES_SYNC.md).
 - **Markdown reading:** open `.md` and `.markdown` files from the SD card, with headings, lists, code blocks, and reading progress. See the [viewer guide](crosspoint-upstream/docs/markdown.md).
@@ -88,3 +89,5 @@ When upgrading, close KOReader and remove the old `haakanpoint.koplugin` folder 
 BuddyPoint incorporates [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) (MIT) and [FreeInk SDK](https://github.com/Free-Ink/freeink-sdk). CrossPoint source was imported at `4b17a7bb9f78babc5d96d58e066b365145d5088b`, with the local BuddyPoint modifications included. Original licenses and attribution remain in their respective directories.
 
 The flasher uses Espressif's esptool-js. Bundled library licenses are in [NOTICE.txt](web-flasher/vendor/NOTICE.txt). The [web flasher guide](docs/WEB_FLASHER.md) covers deployment and validation.
+
+AO3 support takes inspiration from [AvesO3](https://github.com/SiliconAves/AvesO3) by Dave Allie (MIT), with BuddyPoint's own themed interface and authenticated bookmark client. See the [integration notes and attribution](docs/AO3.md#development-and-attribution).

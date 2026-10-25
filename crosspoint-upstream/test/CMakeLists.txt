@@ -83,3 +83,4 @@ add_subdirectory(sudoku)
 add_subdirectory(markdown)
 
 add_subdirectory(ota_release)
+add_subdirectory(ao3)

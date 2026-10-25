@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Ao3Badge.h>
 #include <LibraryIndexFile.h>
 
 #include <cstdint>
@@ -9,6 +10,7 @@
 
 #include "RecentBooksStore.h"
 #include "activities/UiTabListActivity.h"
+#include "network/Ao3Client.h"
 
 // One Library screen: every indexed book on the card shown by recency, title,
 // or author. The Recent shelf orders by file modification time (when a book
@@ -126,6 +128,8 @@ class LibraryListActivity final : public UiTabListActivity {
   // order is discovery order rather than silently showing a wrong one.
   bool degraded = false;
   bool markdownRefreshed = false;
+  bool ao3Refreshed = false;
+  Ao3Client ao3Client;
 
   // Rows surviving the file-type and query filters, in active sort order.
   std::string query;
@@ -152,7 +156,10 @@ class LibraryListActivity final : public UiTabListActivity {
   std::vector<freeink::ui::ListItem> winItems;
   std::vector<std::string> winTitles;
   std::vector<std::string> winAuthors;
+  std::vector<std::string> winDetails;
   std::vector<std::string> winHeaders;
+  // Only a visible window of 288-byte badges, reused across renders.
+  std::vector<ao3::Badge> winBadges;
 
   // Pinned overlay state: per store entry its RecentAsc row (0xFFFF when the
   // book is not in the index), and the current-direction rows to skip, sorted

@@ -1,4 +1,4 @@
-name: Notes and checklist tests
+name: Firmware feature tests
 on:
   push:
     branches: [main]
@@ -18,8 +18,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lua5.4 libexpat1-dev zlib1g-dev
       - name: Test KOReader notes and transfers
         run: lua scripts/test_notes.lua
-      - name: Test library, Markdown and OTA
+      - name: Test library, Markdown, AO3 and OTA
         run: |
           cmake -S crosspoint-upstream/test -B /tmp/tests
-          cmake --build /tmp/tests --target LibraryBuilderTest LibraryIndexFileTest MarkdownChecklistTest NoteToolsTest MarkdownDocumentTest MarkdownTest OtaReleaseTest ReleaseJsonParserTest -j2
-          ctest --test-dir /tmp/tests -R '^(LibraryBuilderTest|LibraryIndexFile|LibraryShelf|NoteToolsTest|Markdown|OtaRelease|ReleaseJsonParser)' --output-on-failure
+          cmake --build /tmp/tests --target LibraryBuilderTest LibraryIndexFileTest MarkdownChecklistTest NoteToolsTest MarkdownDocumentTest MarkdownTest OtaReleaseTest ReleaseJsonParserTest Ao3Test Ao3ClientTest -j2
+          ctest --test-dir /tmp/tests -R '^(LibraryBuilderTest|LibraryIndexFile|LibraryShelf|NoteToolsTest|Markdown|OtaRelease|ReleaseJsonParser|Ao3)' --output-on-failure

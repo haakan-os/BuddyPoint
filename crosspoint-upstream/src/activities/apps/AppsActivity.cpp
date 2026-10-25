@@ -2,6 +2,7 @@
 
 #include <Memory.h>
 
+#include "Ao3Activity.h"
 #include "SudokuActivity.h"
 #include "activities/home/FileBrowserActivity.h"
 #include "components/UITheme.h"
@@ -21,6 +22,8 @@ void AppsActivity::buildScreen(UiScreen& screen) {
   rows[1].actionValue = 1;
   rows[2].label = tr(STR_READING_NOTES);
   rows[2].actionValue = 2;
+  rows[3].label = tr(STR_AO3_TITLE);
+  rows[3].actionValue = 3;
   fui::ListProps props;
   props.items = rows;
   props.count = listCount();
@@ -36,6 +39,8 @@ void AppsActivity::activateIndex(int index) {
   std::unique_ptr<Activity> activity;
   if (index == 0)
     activity = makeUniqueNoThrow<SudokuActivity>(renderer, mappedInput);
+  else if (index == 3)
+    activity = makeUniqueNoThrow<Ao3Activity>(renderer, mappedInput);
   else
     activity = makeUniqueNoThrow<FileBrowserActivity>(renderer, mappedInput, index == 2 ? "/BuddyNotes" : "/",
                                                       FileBrowserActivity::Mode::Markdown);
