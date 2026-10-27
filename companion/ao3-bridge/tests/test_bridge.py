@@ -81,6 +81,30 @@ def blurb(identifier):
 
 
 class Ao3Test(unittest.TestCase):
+    def test_login_parses_streamed_pages_before_saving_session(self):
+        import requests
+        with tempfile.TemporaryDirectory() as directory:
+            client = Ao3(directory)
+            def request(method, url, **kwargs):
+                response = requests.Response()
+                response.status_code = 200
+                if method == "GET":
+                    markup = '<html><meta charset="utf-8"><input name="authenticity_token" value="csrf-value"></html>'
+                else:
+                    self.assertEqual(kwargs["data"]["authenticity_token"], "csrf-value")
+                    self.assertEqual(kwargs["data"]["user[password]"], "private-password")
+                    client.session.cookies.set_cookie(requests.cookies.create_cookie(
+                        "_session", "authenticated", domain="archiveofourown.org", secure=True))
+                    markup = '<html><meta charset="utf-8">' + GREETING + '<p>Signed in</p></html>'
+                response.raw = io.BytesIO(markup.encode())
+                return response
+            with patch.object(client.session, "request", side_effect=request) as fetch, patch("ao3.time.sleep"):
+                self.assertEqual(client.login("Reader", "private-password"), {"username": "Reader"})
+                self.assertEqual(fetch.call_count, 2)
+            self.assertEqual(Ao3(directory).username, "Reader")
+            for file in Path(directory).iterdir():
+                self.assertNotIn(b"private-password", file.read_bytes())
+
     def test_login_uses_csrf_and_persists_session_without_password(self):
         import requests
         with tempfile.TemporaryDirectory() as directory:

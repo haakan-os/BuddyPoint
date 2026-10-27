@@ -138,7 +138,7 @@ class Ao3:
                 content.extend(chunk)
                 if len(content) > 2 * 1024 * 1024:
                     raise BridgeError("parse", "AO3 page exceeded the size limit")
-        soup = BeautifulSoup(content, "html.parser")
+        soup = BeautifulSoup(bytes(content), "html.parser")
         if self.username:
             self.save()
         return soup
