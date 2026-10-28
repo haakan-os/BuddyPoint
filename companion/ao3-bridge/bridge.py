@@ -5,6 +5,7 @@ import os
 import queue
 import re
 import secrets
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,8 +13,17 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
+from urllib3.util import connection
 from ao3 import Ao3, BridgeError, work_id
 from optimizer import OPTIMIZER_VERSION
+
+
+def configure_outbound_network():
+    """Set urllib3's process-wide address family before starting the worker."""
+    force_ipv4 = os.environ.get("AO3_FORCE_IPV4", "false").lower() == "true"
+    if force_ipv4:
+        connection.allowed_gai_family = lambda: socket.AF_INET
+    return force_ipv4
 
 
 class Service:
@@ -287,6 +297,8 @@ if __name__ == "__main__":
         print(os.environ.get("BRIDGE_TOKEN") or (Path(args.data) / "device-token").read_text().strip())
     else:
         os.umask(0o077)
+        force_ipv4 = configure_outbound_network()
+        print("AO3 outbound networking:", "IPv4 only" if force_ipv4 else "system default", flush=True)
         service = Service(args.data)
         print("BuddyPoint AO3 bridge listening on port", args.port, flush=True)
         Server(("0.0.0.0", args.port), service).serve_forever()

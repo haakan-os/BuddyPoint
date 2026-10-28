@@ -31,11 +31,38 @@ in a Compose `.env` file to change the host port or bind address. For example:
 ```dotenv
 BRIDGE_PORT=8080
 OPTIMIZE_EPUB=true
+AO3_FORCE_IPV4=false
 ```
 
 HTTP is intended for a trusted home LAN. For access outside it, use HTTPS through
 your reverse proxy and preserve the original `Host` header. The firmware verifies
 HTTPS certificates. Do not forward the plain HTTP port to the internet.
+
+### Test an IPv4 route to AO3
+
+If AO3 returns HTTP 525, compare the host's default connection with an IPv4-only
+request. HTTP 525 is an upstream TLS error; it does not by itself identify IPv6
+as the cause. This command prints the status and destination IP without cookies:
+
+```sh
+curl -4 -sS -o /dev/null --connect-timeout 15 --max-time 45 \
+  -w 'HTTP %{http_code}; remote IP %{remote_ip}\n' \
+  https://archiveofourown.org/users/login
+```
+
+To test the bridge over IPv4, set `AO3_FORCE_IPV4=true` in the `.env` file next
+to `compose.yaml`, then run `docker compose up -d --build`. Startup logs will
+show `AO3 outbound networking: IPv4 only`. The setting applies to all outbound
+Requests/urllib3 connections in the bridge process, including login, bookmarks
+and EPUB downloads. It retains DNS hostname resolution, TLS certificate and
+hostname verification, and configured proxies. With an HTTP(S) proxy, it selects
+IPv4 for the connection to the proxy; the proxy controls its onward route to AO3.
+It does not disable IPv6 on the host or change Tailscale or reader networking.
+
+Set `AO3_FORCE_IPV4=false` and run `docker compose up -d` to restore normal
+address selection. No firmware update or data-volume reset is needed. A separate
+`docker compose exec ... python -c` command does not run the bridge's startup
+configuration; use the bridge web page to test login after restarting.
 
 ## Configure the Xteink
 

@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import socket
 import sys
 import tempfile
 import threading
@@ -17,7 +18,8 @@ sys.path[:0] = [str(ROOT), str(ROOT.parent)]
 from PIL import Image
 from bs4 import BeautifulSoup
 from ao3 import Ao3, BridgeError, metadata, signed_in, trusted
-from bridge import Server, Service, byte_range
+from bridge import Server, Service, byte_range, configure_outbound_network
+from urllib3.util import connection
 from optimizer import optimize_epub, validate_epub
 
 
@@ -78,6 +80,35 @@ class OptimizerTest(unittest.TestCase):
 GREETING = '<div id="header"><div id="greeting"><a href="/users/logout?return_to=x">Log out</a></div></div>'
 def blurb(identifier):
     return f'<li class="bookmark blurb"><h4 class="heading"><a href="/works/{identifier}">Fic {identifier}</a> by <a rel="author">Writer</a></h4><dl class="stats"><dd class="chapters">3/4</dd><dd class="words">1,234</dd></dl></li>'
+
+
+class NetworkTest(unittest.TestCase):
+    def test_ipv4_mode_resolves_and_connects_only_ipv4(self):
+        from unittest.mock import Mock
+        sock = Mock()
+        address = ("192.0.2.1", 443)
+        with patch.dict(os.environ, {"AO3_FORCE_IPV4": "true"}), \
+                patch.object(connection, "allowed_gai_family"), \
+                patch.object(connection.socket, "getaddrinfo", return_value=[
+                    (socket.AF_INET, socket.SOCK_STREAM, 6, "", address)]) as resolve, \
+                patch.object(connection.socket, "socket", return_value=sock) as create_socket:
+            self.assertTrue(configure_outbound_network())
+            connection.create_connection(("archiveofourown.org", 443), timeout=15)
+            resolve.assert_called_once_with("archiveofourown.org", 443, socket.AF_INET, socket.SOCK_STREAM)
+            create_socket.assert_called_once_with(socket.AF_INET, socket.SOCK_STREAM, 6)
+            sock.connect.assert_called_once_with(address)
+            with tempfile.TemporaryDirectory() as directory:
+                self.assertTrue(Ao3(directory).session.verify)
+
+    def test_default_mode_preserves_system_address_selection(self):
+        for setting in (None, "false"):
+            with self.subTest(setting=setting), patch.dict(os.environ), \
+                    patch.object(connection, "allowed_gai_family") as original:
+                os.environ.pop("AO3_FORCE_IPV4", None)
+                if setting is not None:
+                    os.environ["AO3_FORCE_IPV4"] = setting
+                self.assertFalse(configure_outbound_network())
+                self.assertIs(connection.allowed_gai_family, original)
 
 
 class Ao3Test(unittest.TestCase):
